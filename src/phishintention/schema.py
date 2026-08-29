@@ -19,6 +19,122 @@ INTENTS = [
     "personal_information_harvesting",
 ]
 
+def normalise_confidence(
+    value: Any,
+    default: float = 0.0,
+) -> float:
+    """
+    Convert different model-generated confidence formats into
+    one floating-point value between 0 and 1.
+
+    Supported examples:
+        0.85
+        "0.85"
+        "85%"
+        [0.85]
+        {"score": 0.85}
+        {"confidence": 0.85}
+        [{"score": 0.85}, {"score": 0.70}]
+    """
+
+    if value is None:
+        return default
+
+    if isinstance(value, bool):
+        return float(value)
+
+    if isinstance(value, (int, float)):
+        number = float(value)
+
+        # Tolerate percentage-style numeric values such as 85.
+        if number > 1 and number <= 100:
+            number = number / 100
+
+        return max(
+            0.0,
+            min(1.0, number),
+        )
+
+    if isinstance(value, str):
+        cleaned = value.strip()
+
+        if not cleaned:
+            return default
+
+        is_percentage = cleaned.endswith("%")
+
+        cleaned = cleaned.replace("%", "").strip()
+
+        try:
+            number = float(cleaned)
+
+            if is_percentage or (
+                number > 1 and number <= 100
+            ):
+                number = number / 100
+
+            return max(
+                0.0,
+                min(1.0, number),
+            )
+
+        except ValueError:
+            return default
+
+    if isinstance(value, dict):
+        preferred_keys = [
+            "confidence",
+            "score",
+            "overall_confidence",
+            "probability",
+            "value",
+        ]
+
+        for key in preferred_keys:
+            if key in value:
+                return normalise_confidence(
+                    value[key],
+                    default=default,
+                )
+
+        numeric_values = []
+
+        for item in value.values():
+            confidence = normalise_confidence(
+                item,
+                default=-1.0,
+            )
+
+            if confidence >= 0:
+                numeric_values.append(confidence)
+
+        if numeric_values:
+            return max(numeric_values)
+
+        return default
+
+    if isinstance(value, list):
+        if not value:
+            return default
+
+        confidence_values = []
+
+        for item in value:
+            confidence = normalise_confidence(
+                item,
+                default=-1.0,
+            )
+
+            if confidence >= 0:
+                confidence_values.append(confidence)
+
+        if not confidence_values:
+            return default
+
+        # For an overall result, use the highest supported confidence.
+        return max(confidence_values)
+
+    return default
 
 def evidence_item_to_string(item: Any) -> str:
     """
@@ -164,6 +280,7 @@ class Candidate(BaseModel):
     intent: Intent
 
     confidence: float = Field(
+        default=0.0,
         ge=0,
         le=1,
     )
@@ -171,6 +288,17 @@ class Candidate(BaseModel):
     evidence: list[str] = Field(
         default_factory=list
     )
+
+    @field_validator(
+        "confidence",
+        mode="before",
+    )
+    @classmethod
+    def normalise_candidate_confidence(
+        cls,
+        value: Any,
+    ) -> float:
+        return normalise_confidence(value)
 
     @field_validator(
         "evidence",
@@ -213,6 +341,7 @@ class AnalysisResult(BaseModel):
         "evidence",
         mode="before",
     )
+    
     @classmethod
     def normalise_final_evidence(
         cls,
@@ -235,3 +364,15 @@ class AnalysisResult(BaseModel):
         return {
             "general": normalise_evidence_list(value)
         }
+
+    @field_validator(
+            "confidence",
+            "evidence_consistency",
+            mode="before",
+        )
+    @classmethod
+    def normalise_result_scores(
+        cls,
+        value: Any,
+    ) -> float:
+        return normalise_confidence(value)

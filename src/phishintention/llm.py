@@ -332,20 +332,26 @@ Previous invalid response, provided only to help correct formatting:
 
 
 class MockClient:
+    """
+    Deterministic model client used for tests and UI demonstration.
+
+    The matching order is important. Validator prompts may include
+    specialist reports, so validator detection must happen before
+    specialist detection.
+    """
+
     def ask(
         self,
         prompt: str,
         image_path: str | Path | None = None,
     ) -> dict[str, Any]:
-        """
-        Deterministic client used by automated tests.
-        """
         prompt_lower = prompt.lower()
 
-        if "vision analyst" in prompt_lower:
+        # Layer 1: Vision Analysis Agent
+        if "website-screenshot vision analyst" in prompt_lower:
             return {
                 "visible_text": (
-                    "Demo Sign In Email Password"
+                    "Demo Sign In Email Password Login"
                 ),
                 "ui_elements": [
                     "Email input field",
@@ -356,12 +362,13 @@ class MockClient:
                     "Sign-in form",
                 ],
                 "brand_signals": [
-                    "Demo",
+                    "Demo website",
                 ],
             }
 
+        # Layer 3: Initial Classification Agent
         if (
-            "initial multi-label"
+            "initial multi-label phishing-intention classifier"
             in prompt_lower
         ):
             return {
@@ -370,15 +377,24 @@ class MockClient:
                         "intent": "credential_theft",
                         "confidence": 0.86,
                         "evidence": [
-                            "Password input field",
+                            "A password input field is visible.",
+                            "The webpage contains a sign-in form.",
                         ],
                     }
                 ]
             }
 
-        # Check validator before specialist because the validator prompt
-        # contains the supplied specialist reports.
-        if "you are the validator" in prompt_lower:
+        # Layer 5: Validation and Synthesis Agent
+        #
+        # IMPORTANT:
+        # This condition must remain above the specialist condition.
+        # The validator prompt contains the phrase "specialist reports".
+        if (
+            "validation and synthesis agent"
+            in prompt_lower
+            or "you are the validator"
+            in prompt_lower
+        ):
             return {
                 "labels": [
                     "credential_theft",
@@ -386,16 +402,22 @@ class MockClient:
                 "confidence": 0.87,
                 "evidence": {
                     "credential_theft": [
-                        (
-                            "The sign-in form requests "
-                            "authentication information."
-                        )
+                        "The webpage contains an email input field.",
+                        "The webpage contains a password input field.",
+                        "A login button is visible.",
                     ]
                 },
                 "evidence_consistency": 1.0,
             }
 
-        if "specialist" in prompt_lower:
+        # Layer 4: Specialist Agent
+        if (
+            "defensive specialist" in prompt_lower
+            or (
+                "specialist" in prompt_lower
+                and "specialist reports" not in prompt_lower
+            )
+        ):
             return {
                 "supported": True,
                 "confidence": 0.88,
@@ -407,14 +429,22 @@ class MockClient:
                 ],
             }
 
-        return {
-            "labels": [
-                "credential_theft",
-            ],
-            "confidence": 0.80,
-            "evidence": {
-                "credential_theft": [
-                    "A password input field is visible."
-                ]
-            },
-        }
+        # Single-agent baseline
+        if "single defensive analyst" in prompt_lower:
+            return {
+                "labels": [
+                    "credential_theft",
+                ],
+                "confidence": 0.80,
+                "evidence": {
+                    "credential_theft": [
+                        "A password input field is visible."
+                    ]
+                },
+                "evidence_consistency": 1.0,
+            }
+
+        raise ValueError(
+            "MockClient received an unrecognised prompt. "
+            f"Prompt beginning: {prompt[:200]!r}"
+        )
