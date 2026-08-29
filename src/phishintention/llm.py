@@ -1,26 +1,420 @@
-import base64, json, re, requests
-from pathlib import Path
-from PIL import Image
+import base64
+import json
+import re
 from io import BytesIO
+from pathlib import Path
+from typing import Any
+
+import requests
+from PIL import Image
+
+
 class OllamaClient:
-    def __init__(self, base_url, model, max_side=1600): self.base_url,self.model,self.max_side=base_url.rstrip('/'),model,max_side
-    def _image_b64(self,path):
-        im=Image.open(path).convert('RGB'); im.thumbnail((self.max_side,self.max_side)); b=BytesIO(); im.save(b,'JPEG',quality=85); return base64.b64encode(b.getvalue()).decode()
-    def ask(self,prompt,image_path=None):
-        payload={"model":self.model,"prompt":prompt,"stream":False,"format":"json"}
-        if image_path: payload["images"]=[self._image_b64(image_path)]
-        r=requests.post(self.base_url+"/api/generate",json=payload,timeout=300); r.raise_for_status()
-        raw=r.json()["response"]
-        try:return json.loads(raw)
+    def __init__(
+        self,
+        base_url: str,
+        model: str,
+        max_side: int = 1600,
+    ):
+        self.base_url = base_url.rstrip("/")
+        self.model = model
+        self.max_side = max_side
+
+    def _image_b64(
+        self,
+        path: str | Path,
+    ) -> str:
+        """
+        Resize and encode an image for Ollama.
+        """
+        image = Image.open(path).convert("RGB")
+
+        image.thumbnail(
+            (
+                self.max_side,
+                self.max_side,
+            )
+        )
+
+        buffer = BytesIO()
+
+        image.save(
+            buffer,
+            format="JPEG",
+            quality=85,
+            optimize=True,
+        )
+
+        return base64.b64encode(
+            buffer.getvalue()
+        ).decode("utf-8")
+
+    @staticmethod
+    def _remove_code_fences(
+        text: str,
+    ) -> str:
+        """
+        Remove Markdown code fences occasionally returned by a model.
+        """
+        cleaned = text.strip()
+
+        cleaned = re.sub(
+            r"^```(?:json)?\s*",
+            "",
+            cleaned,
+            flags=re.IGNORECASE,
+        )
+
+        cleaned = re.sub(
+            r"\s*```$",
+            "",
+            cleaned,
+        )
+
+        return cleaned.strip()
+
+    @staticmethod
+    def _extract_json_object(
+        text: str,
+    ) -> str | None:
+        """
+        Extract the first balanced JSON object from model output.
+
+        This is safer than the previous greedy regular expression because
+        it understands nested braces and quoted strings.
+        """
+        start = text.find("{")
+
+        if start == -1:
+            return None
+
+        depth = 0
+        inside_string = False
+        escaped = False
+
+        for index in range(
+            start,
+            len(text),
+        ):
+            character = text[index]
+
+            if inside_string:
+                if escaped:
+                    escaped = False
+                    continue
+
+                if character == "\\":
+                    escaped = True
+                    continue
+
+                if character == '"':
+                    inside_string = False
+
+                continue
+
+            if character == '"':
+                inside_string = True
+                continue
+
+            if character == "{":
+                depth += 1
+                continue
+
+            if character == "}":
+                depth -= 1
+
+                if depth == 0:
+                    return text[start:index + 1]
+
+        return None
+
+    @staticmethod
+    def _parse_json(
+        raw: str,
+    ) -> dict[str, Any]:
+        """
+        Parse a JSON response, allowing surrounding explanatory text.
+        """
+        cleaned = OllamaClient._remove_code_fences(
+            raw
+        )
+
+        try:
+            parsed = json.loads(cleaned)
+
+            if not isinstance(parsed, dict):
+                raise ValueError(
+                    "The model returned JSON, but the root value "
+                    "was not an object."
+                )
+
+            return parsed
+
         except json.JSONDecodeError:
-            m=re.search(r'\{.*\}',raw,re.S)
-            if not m: raise ValueError("Model did not return JSON: "+raw[:300])
-            return json.loads(m.group())
+            extracted = OllamaClient._extract_json_object(
+                cleaned
+            )
+
+            if extracted is None:
+                raise ValueError(
+                    "No complete JSON object was found in the "
+                    "model response."
+                )
+
+            parsed = json.loads(extracted)
+
+            if not isinstance(parsed, dict):
+                raise ValueError(
+                    "The extracted JSON root was not an object."
+                )
+
+            return parsed
+
+    def _generate(
+        self,
+        prompt: str,
+        image_path: str | Path | None = None,
+        num_predict: int = 2048,
+    ) -> str:
+        """
+        Send one generation request to Ollama.
+        """
+        payload: dict[str, Any] = {
+            "model": self.model,
+            "prompt": prompt,
+            "stream": False,
+            "format": "json",
+            "options": {
+                "temperature": 0,
+                "num_predict": num_predict,
+            },
+            "keep_alive": "10m",
+        }
+
+        if image_path is not None:
+            payload["images"] = [
+                self._image_b64(image_path)
+            ]
+
+        response = requests.post(
+            f"{self.base_url}/api/generate",
+            json=payload,
+            timeout=600,
+        )
+
+        response.raise_for_status()
+
+        response_body = response.json()
+
+        raw_response = response_body.get(
+            "response",
+            "",
+        )
+
+        if not isinstance(raw_response, str):
+            raise ValueError(
+                "Ollama returned a non-text response field."
+            )
+
+        if not raw_response.strip():
+            raise ValueError(
+                "Ollama returned an empty response."
+            )
+
+        return raw_response
+
+    def ask(
+        self,
+        prompt: str,
+        image_path: str | Path | None = None,
+    ) -> dict[str, Any]:
+        """
+        Request structured JSON from Ollama.
+
+        If the first response is incomplete or malformed, perform one
+        corrective retry using the original image and stricter instructions.
+        """
+        structured_prompt = f"""
+{prompt}
+
+STRICT OUTPUT REQUIREMENTS:
+
+1. Return exactly one complete JSON object.
+2. Do not return Markdown.
+3. Do not use JSON code fences.
+4. Do not include text before or after the JSON object.
+5. Use valid double-quoted JSON keys and string values.
+6. Close every array, string, and object.
+7. Keep evidence concise.
+8. Do not repeat visible text unnecessarily.
+9. Limit each evidence list to at most 10 short items.
+10. The complete response must be valid for Python json.loads().
+""".strip()
+
+        first_raw = self._generate(
+            prompt=structured_prompt,
+            image_path=image_path,
+            num_predict=2048,
+        )
+
+        try:
+            return self._parse_json(
+                first_raw
+            )
+
+        except (
+            json.JSONDecodeError,
+            ValueError,
+        ) as first_error:
+            repair_prompt = f"""
+{structured_prompt}
+
+Your previous response could not be parsed because it was incomplete
+or invalid.
+
+Return the analysis again as one smaller, complete JSON object.
+
+Important:
+- Shorten visible_text to the most security-relevant visible text.
+- Use no more than 8 UI elements.
+- Use no more than 6 visual cues.
+- Use no more than 4 brand signals.
+- Each array item must be a short plain string.
+- Return JSON only.
+- Ensure all braces and arrays are closed.
+
+Previous invalid response, provided only to help correct formatting:
+
+{first_raw[:4000]}
+""".strip()
+
+            second_raw = self._generate(
+                prompt=repair_prompt,
+                image_path=image_path,
+                num_predict=4096,
+            )
+
+            try:
+                return self._parse_json(
+                    second_raw
+                )
+
+            except (
+                json.JSONDecodeError,
+                ValueError,
+            ) as second_error:
+                diagnostic_directory = Path(
+                    "outputs/debug"
+                )
+
+                diagnostic_directory.mkdir(
+                    parents=True,
+                    exist_ok=True,
+                )
+
+                (
+                    diagnostic_directory
+                    / "last_invalid_ollama_response.txt"
+                ).write_text(
+                    second_raw,
+                    encoding="utf-8",
+                )
+
+                raise ValueError(
+                    "Ollama did not return a complete valid JSON "
+                    "object after two attempts. The final raw response "
+                    "was saved to "
+                    "'outputs/debug/"
+                    "last_invalid_ollama_response.txt'. "
+                    f"First parsing error: {first_error}. "
+                    f"Second parsing error: {second_error}."
+                ) from second_error
+
+
 class MockClient:
-    def ask(self,prompt,image_path=None):
-        p=prompt.lower()
-        if 'vision analyst' in p:return {"visible_text":"Sign in Email Password","ui_elements":["login form","password field"],"visual_cues":["brand logo"],"brand_signals":["demo"]}
-        if 'initial multi-label' in p:return {"candidates":[{"intent":"credential_theft","confidence":0.86,"evidence":["password field"]}]}
-        if 'validator' in p:return {"labels":["credential_theft"],"confidence":0.87,"evidence":{"credential_theft":["login form requests password"]},"evidence_consistency":1.0}
-        if 'specialist' in p:return {"confidence":0.88,"evidence":["login form requests password"],"supported":True}
-        return {"labels":["credential_theft"],"confidence":0.8,"evidence":{"credential_theft":["password field"]}}
+    def ask(
+        self,
+        prompt: str,
+        image_path: str | Path | None = None,
+    ) -> dict[str, Any]:
+        """
+        Deterministic client used by automated tests.
+        """
+        prompt_lower = prompt.lower()
+
+        if "vision analyst" in prompt_lower:
+            return {
+                "visible_text": (
+                    "Demo Sign In Email Password"
+                ),
+                "ui_elements": [
+                    "Email input field",
+                    "Password input field",
+                    "Login button",
+                ],
+                "visual_cues": [
+                    "Sign-in form",
+                ],
+                "brand_signals": [
+                    "Demo",
+                ],
+            }
+
+        if (
+            "initial multi-label"
+            in prompt_lower
+        ):
+            return {
+                "candidates": [
+                    {
+                        "intent": "credential_theft",
+                        "confidence": 0.86,
+                        "evidence": [
+                            "Password input field",
+                        ],
+                    }
+                ]
+            }
+
+        # Check validator before specialist because the validator prompt
+        # contains the supplied specialist reports.
+        if "you are the validator" in prompt_lower:
+            return {
+                "labels": [
+                    "credential_theft",
+                ],
+                "confidence": 0.87,
+                "evidence": {
+                    "credential_theft": [
+                        (
+                            "The sign-in form requests "
+                            "authentication information."
+                        )
+                    ]
+                },
+                "evidence_consistency": 1.0,
+            }
+
+        if "specialist" in prompt_lower:
+            return {
+                "supported": True,
+                "confidence": 0.88,
+                "evidence": [
+                    (
+                        "The login form contains a "
+                        "password input field."
+                    )
+                ],
+            }
+
+        return {
+            "labels": [
+                "credential_theft",
+            ],
+            "confidence": 0.80,
+            "evidence": {
+                "credential_theft": [
+                    "A password input field is visible."
+                ]
+            },
+        }

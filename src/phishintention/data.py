@@ -46,7 +46,8 @@ def infer_putra_status(path: Path) -> str:
     return "phishing"
 
 
-def find_phish_iris_images(root: str | Path) -> list"""
+def find_phish_iris_images(root: str | Path) -> list:
+    """
     Find all supported Phish-IRIS screenshots.
 
     Phish-IRIS stores one screenshot per brand-class record, so all
@@ -89,7 +90,8 @@ def choose_putra_screenshot(screenshots_directory: Path) -> Path | None:
     return fallback_images[0] if fallback_images else None
 
 
-def find_putra_records(root: str | Path) -> list"""
+def find_putra_records(root: str | Path) -> list:
+    """
     Discover one record per Putra website folder.
 
     A valid record is recognised through a directory named 'screenshots'.
@@ -217,7 +219,8 @@ def empty_intention_columns() -> dict:
 
 def build_phish_iris_rows(
     root: str | Path | None,
-) -> list"""
+) -> list:
+    """
     Build manifest rows for Phish-IRIS.
     """
     if not root:
@@ -256,7 +259,8 @@ def build_phish_iris_rows(
 
 def build_putra_rows(
     root: str | Path | None,
-) -> list"""
+) -> list:
+    """
     Build one manifest row per Putra website.
     """
     if not root:
