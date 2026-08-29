@@ -1,0 +1,9 @@
+pydantic>=2.7,<3
+python-dotenv>=1.0
+requests>=2.32
+Pillow>=10.3
+pandas>=2.2
+scikit-learn>=1.5
+streamlit>=1.36
+pytesseract>=0.3.13
+pytest>=8.2

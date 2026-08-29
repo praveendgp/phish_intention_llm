@@ -1,0 +1,12 @@
+# environments and secrets
+.venv/
+.env
+__pycache__/
+.pytest_cache/
+# large/restricted data and generated outputs
+data/raw/*
+data/processed/*.csv
+outputs/*
+!data/raw/.gitkeep
+!data/processed/.gitkeep
+!outputs/.gitkeep
