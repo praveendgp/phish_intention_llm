@@ -1,22 +1,767 @@
 [
   {
-    "id": "k1",
+    "id": "credential_theft_001",
     "category": "credential_theft",
-    "text": "Credential theft indicators include username, email, password, PIN, OTP, security answer, recovery code and sign-in forms."
+    "knowledge_type": "primary_feature",
+    "text": "Visible username, user ID, login email, password, passcode, PIN, OTP, MFA token, authentication code, recovery code, or security-answer requests support Credential Theft.",
+    "source": "Microsoft phishing protection",
+    "retrieval_terms": [
+      "username",
+      "user ID",
+      "login email",
+      "password",
+      "passcode",
+      "PIN",
+      "OTP",
+      "MFA",
+      "authentication code",
+      "recovery code",
+      "security answer"
+    ],
+    "polarity": "supporting"
   },
   {
-    "id": "k2",
+    "id": "credential_theft_002",
+    "category": "credential_theft",
+    "knowledge_type": "distinctive_indicator",
+    "text": "A password field combined with account verification, session expiry, unusual activity, account locking, or security-check language is stronger evidence than a password field alone.",
+    "source": "Project evidence policy",
+    "retrieval_terms": [
+      "password field",
+      "verify account",
+      "session expired",
+      "unusual activity",
+      "account locked",
+      "security check"
+    ],
+    "polarity": "supporting"
+  },
+  {
+    "id": "credential_theft_003",
+    "category": "credential_theft",
+    "knowledge_type": "distinctive_indicator",
+    "text": "Requests to approve a push, enter a code from an authenticator app, provide an SMS code, or supply a backup code support theft of second-factor authentication secrets.",
+    "source": "Microsoft credential-phishing patterns",
+    "retrieval_terms": [
+      "approve push",
+      "authenticator code",
+      "SMS code",
+      "backup code",
+      "two-factor",
+      "2FA"
+    ],
+    "polarity": "supporting"
+  },
+  {
+    "id": "credential_theft_004",
+    "category": "credential_theft",
+    "knowledge_type": "specialised_technique",
+    "text": "A fake single-sign-on, webmail, cloud-storage, workplace, or social-media login page can be used to harvest credentials when login secrets are visibly requested.",
+    "source": "Microsoft phishing trends",
+    "retrieval_terms": [
+      "single sign-on",
+      "SSO",
+      "webmail",
+      "cloud login",
+      "work account",
+      "social login"
+    ],
+    "polarity": "supporting"
+  },
+  {
+    "id": "credential_theft_005",
+    "category": "credential_theft",
+    "knowledge_type": "specialised_technique",
+    "text": "A document-sharing or attachment lure that asks the user to sign in before viewing a file supports Credential Theft, not Malware Distribution, unless a suspicious download or execution action is also visible.",
+    "source": "Microsoft phishing trends",
+    "retrieval_terms": [
+      "shared document",
+      "view file",
+      "sign in to view",
+      "file sharing login"
+    ],
+    "polarity": "supporting"
+  },
+  {
+    "id": "credential_theft_006",
+    "category": "credential_theft",
+    "knowledge_type": "specialised_technique",
+    "text": "A QR-code prompt that directs the user to sign in or verify an account supports Credential Theft when the surrounding screenshot explicitly references authentication.",
+    "source": "Microsoft phishing trends",
+    "retrieval_terms": [
+      "QR sign in",
+      "scan to login",
+      "QR verify account",
+      "quishing"
+    ],
+    "polarity": "supporting"
+  },
+  {
+    "id": "credential_theft_007",
+    "category": "credential_theft",
+    "knowledge_type": "common_target",
+    "text": "Credential targets include email, cloud storage, social media, enterprise identity, banking, payment, e-commerce, and government-service accounts.",
+    "source": "Base-paper specialist repository concept",
+    "retrieval_terms": [
+      "email account",
+      "cloud storage",
+      "social media",
+      "enterprise login",
+      "bank login",
+      "payment account",
+      "government login"
+    ],
+    "polarity": "supporting"
+  },
+  {
+    "id": "credential_theft_008",
+    "category": "credential_theft",
+    "knowledge_type": "negative_rule",
+    "text": "A logo, account warning, identity-verification message, or Confirm My Identity button without a visible request for authentication secrets is insufficient on its own to assign Credential Theft.",
+    "source": "Project false-positive control",
+    "retrieval_terms": [
+      "logo only",
+      "account warning",
+      "confirm identity button",
+      "no password",
+      "no login field"
+    ],
+    "polarity": "counterexample"
+  },
+  {
+    "id": "credential_theft_009",
+    "category": "credential_theft",
+    "knowledge_type": "negative_rule",
+    "text": "An email-address field used only for contact, delivery, receipt, newsletter, or account discovery is not automatically a login credential. Interpret the field using nearby labels and actions.",
+    "source": "Project false-positive control",
+    "retrieval_terms": [
+      "contact email",
+      "delivery email",
+      "receipt email",
+      "newsletter email",
+      "find account"
+    ],
+    "polarity": "counterexample"
+  },
+  {
+    "id": "credential_theft_010",
+    "category": "credential_theft",
+    "knowledge_type": "evidence_rule",
+    "text": "Strong Credential Theft evidence names the exact visible secret or authentication field instead of relying only on suspicious tone or brand imitation.",
+    "source": "Project evidence policy",
+    "retrieval_terms": [
+      "exact credential field",
+      "visible password",
+      "visible OTP",
+      "visible PIN"
+    ],
+    "polarity": "constraint"
+  },
+  {
+    "id": "credential_theft_011",
+    "category": "credential_theft",
+    "knowledge_type": "multi_label_rule",
+    "text": "When credential fields appear with phone, address, date of birth, or government-ID fields, assign Credential Theft and Personal Information Harvesting if both sets are visibly supported.",
+    "source": "Project multi-label policy",
+    "retrieval_terms": [
+      "password and phone",
+      "password and address",
+      "password and date of birth",
+      "password and ID"
+    ],
+    "polarity": "supporting"
+  },
+  {
+    "id": "credential_theft_012",
+    "category": "credential_theft",
+    "knowledge_type": "abstention_rule",
+    "text": "If the current screenshot is only a pre-login warning or redirect page and the credential form is not visible, do not infer Credential Theft from a possible next page.",
+    "source": "Project abstention policy",
+    "retrieval_terms": [
+      "pre-login warning",
+      "redirect",
+      "next page",
+      "credentials not visible"
+    ],
+    "polarity": "constraint"
+  },
+  {
+    "id": "financial_fraud_001",
     "category": "financial_fraud",
-    "text": "Financial fraud indicators include card number, CVV, expiry, bank account, transfer, payment, invoice, cryptocurrency, reward or investment solicitation."
+    "knowledge_type": "primary_feature",
+    "text": "Visible requests for card number, CVV or CVC, expiry date, cardholder name, bank account, routing number, IBAN, transfer details, or wallet seed directly support Financial Fraud.",
+    "source": "Microsoft phishing protection",
+    "retrieval_terms": [
+      "card number",
+      "CVV",
+      "CVC",
+      "expiry date",
+      "cardholder",
+      "bank account",
+      "routing number",
+      "IBAN",
+      "wallet seed"
+    ],
+    "polarity": "supporting"
   },
   {
-    "id": "k3",
+    "id": "financial_fraud_002",
+    "category": "financial_fraud",
+    "knowledge_type": "distinctive_indicator",
+    "text": "A payment or billing update request combined with failed delivery, unpaid invoice, subscription expiry, refund, tax, penalty, or suspicious-purchase language supports Financial Fraud when payment details or money transfer are visibly requested.",
+    "source": "Microsoft phishing trends",
+    "retrieval_terms": [
+      "payment update",
+      "failed delivery",
+      "unpaid invoice",
+      "subscription expiry",
+      "refund",
+      "tax payment",
+      "penalty",
+      "suspicious purchase"
+    ],
+    "polarity": "supporting"
+  },
+  {
+    "id": "financial_fraud_003",
+    "category": "financial_fraud",
+    "knowledge_type": "distinctive_indicator",
+    "text": "Requests to send money through wire transfer, gift cards, cryptocurrency, instant payment, or a new beneficiary support Financial Fraud.",
+    "source": "Microsoft phishing protection",
+    "retrieval_terms": [
+      "wire transfer",
+      "gift card",
+      "cryptocurrency",
+      "instant payment",
+      "new beneficiary"
+    ],
+    "polarity": "supporting"
+  },
+  {
+    "id": "financial_fraud_004",
+    "category": "financial_fraud",
+    "knowledge_type": "specialised_technique",
+    "text": "A fake invoice or vendor-payment page can seek direct payment or altered bank details. Visible remittance instructions, amounts, account numbers, or payment controls support Financial Fraud.",
+    "source": "Microsoft phishing trends",
+    "retrieval_terms": [
+      "invoice payment",
+      "vendor payment",
+      "remittance",
+      "amount due",
+      "account number",
+      "pay now"
+    ],
+    "polarity": "supporting"
+  },
+  {
+    "id": "financial_fraud_005",
+    "category": "financial_fraud",
+    "knowledge_type": "specialised_technique",
+    "text": "A parcel redelivery or customs-fee page supports Financial Fraud when it visibly requests a fee or payment-card details.",
+    "source": "Microsoft phishing trends",
+    "retrieval_terms": [
+      "redelivery fee",
+      "customs fee",
+      "shipping fee",
+      "parcel payment"
+    ],
+    "polarity": "supporting"
+  },
+  {
+    "id": "financial_fraud_006",
+    "category": "financial_fraud",
+    "knowledge_type": "specialised_technique",
+    "text": "A tax-refund or tax-debt page supports Financial Fraud when it visibly requests bank, card, transfer, or payment information; personal identity fields may additionally support Personal Information Harvesting.",
+    "source": "Microsoft phishing trends",
+    "retrieval_terms": [
+      "tax refund",
+      "tax debt",
+      "tax payment",
+      "refund bank details"
+    ],
+    "polarity": "supporting"
+  },
+  {
+    "id": "financial_fraud_007",
+    "category": "financial_fraud",
+    "knowledge_type": "common_target",
+    "text": "Financial targets include payment cards, bank accounts, online wallets, merchant accounts, tax payments, invoices, refunds, investments, and cryptocurrency.",
+    "source": "Base-paper specialist repository concept",
+    "retrieval_terms": [
+      "payment card",
+      "bank account",
+      "online wallet",
+      "merchant",
+      "tax",
+      "invoice",
+      "refund",
+      "investment",
+      "crypto"
+    ],
+    "polarity": "supporting"
+  },
+  {
+    "id": "financial_fraud_008",
+    "category": "financial_fraud",
+    "knowledge_type": "negative_rule",
+    "text": "A PayPal, bank, card, invoice, shopping, or cryptocurrency logo does not by itself prove Financial Fraud. Require visible financial-data collection or a money-moving request.",
+    "source": "Project false-positive control",
+    "retrieval_terms": [
+      "payment logo",
+      "bank logo",
+      "invoice logo",
+      "shopping logo",
+      "crypto logo"
+    ],
+    "polarity": "counterexample"
+  },
+  {
+    "id": "financial_fraud_009",
+    "category": "financial_fraud",
+    "knowledge_type": "negative_rule",
+    "text": "A price, order summary, balance, transaction notice, or suspicious-purchase warning without a visible payment request is insufficient by itself for Financial Fraud.",
+    "source": "Project false-positive control",
+    "retrieval_terms": [
+      "price only",
+      "order summary",
+      "balance",
+      "transaction notice",
+      "purchase warning"
+    ],
+    "polarity": "counterexample"
+  },
+  {
+    "id": "financial_fraud_010",
+    "category": "financial_fraud",
+    "knowledge_type": "evidence_rule",
+    "text": "Strong Financial Fraud evidence identifies the exact visible payment field, amount, transfer instruction, card request, account request, or payment button.",
+    "source": "Project evidence policy",
+    "retrieval_terms": [
+      "exact payment field",
+      "amount due",
+      "transfer instruction",
+      "card request",
+      "pay button"
+    ],
+    "polarity": "constraint"
+  },
+  {
+    "id": "financial_fraud_011",
+    "category": "financial_fraud",
+    "knowledge_type": "multi_label_rule",
+    "text": "Payment-card or bank fields together with name, address, phone, date of birth, tax ID, or identity-document fields can support Financial Fraud and Personal Information Harvesting.",
+    "source": "Project multi-label policy",
+    "retrieval_terms": [
+      "card and address",
+      "bank and phone",
+      "payment and date of birth",
+      "payment and ID"
+    ],
+    "polarity": "supporting"
+  },
+  {
+    "id": "financial_fraud_012",
+    "category": "financial_fraud",
+    "knowledge_type": "abstention_rule",
+    "text": "A sign-in form for a bank or payment service is Credential Theft when it requests authentication secrets; do not assign Financial Fraud unless financial details or a money-moving action are visible.",
+    "source": "Project label-boundary policy",
+    "retrieval_terms": [
+      "bank login",
+      "payment login",
+      "password only",
+      "no payment field"
+    ],
+    "polarity": "constraint"
+  },
+  {
+    "id": "malware_distribution_001",
     "category": "malware_distribution",
-    "text": "Malware distribution indicators include download, install, update, APK, executable, attachment, document viewer, antivirus alert or software prompt."
+    "knowledge_type": "primary_feature",
+    "text": "Visible prompts to download, open, install, execute, run, enable, update, repair, scan, or activate a file or application support Malware Distribution when the context is suspicious.",
+    "source": "CISA phishing signs; Microsoft phishing protection",
+    "retrieval_terms": [
+      "download",
+      "open file",
+      "install",
+      "execute",
+      "run",
+      "enable",
+      "update",
+      "repair",
+      "scan",
+      "activate"
+    ],
+    "polarity": "supporting"
   },
   {
-    "id": "k4",
+    "id": "malware_distribution_002",
+    "category": "malware_distribution",
+    "knowledge_type": "distinctive_indicator",
+    "text": "Requests to enable macros, allow content, disable antivirus, change security settings, or bypass warnings are strong malware-delivery indicators.",
+    "source": "Microsoft phishing protection",
+    "retrieval_terms": [
+      "enable macros",
+      "allow content",
+      "disable antivirus",
+      "change security settings",
+      "bypass warning"
+    ],
+    "polarity": "supporting"
+  },
+  {
+    "id": "malware_distribution_003",
+    "category": "malware_distribution",
+    "knowledge_type": "distinctive_indicator",
+    "text": "Fake browser, Flash, codec, antivirus, security, operating-system, or application update prompts can support Malware Distribution when installation is requested.",
+    "source": "Microsoft phishing techniques",
+    "retrieval_terms": [
+      "browser update",
+      "Flash update",
+      "codec",
+      "antivirus update",
+      "security update",
+      "system update",
+      "application update"
+    ],
+    "polarity": "supporting"
+  },
+  {
+    "id": "malware_distribution_004",
+    "category": "malware_distribution",
+    "knowledge_type": "specialised_technique",
+    "text": "ClickFix-style instructions that ask the user to open Run, Terminal, PowerShell, Command Prompt, copy a command, paste a command, or execute a command strongly support Malware Distribution.",
+    "source": "Microsoft ClickFix research",
+    "retrieval_terms": [
+      "ClickFix",
+      "Windows Run",
+      "Terminal",
+      "PowerShell",
+      "Command Prompt",
+      "copy command",
+      "paste command"
+    ],
+    "polarity": "supporting"
+  },
+  {
+    "id": "malware_distribution_005",
+    "category": "malware_distribution",
+    "knowledge_type": "specialised_technique",
+    "text": "Unexpected PDF, Word, Excel, archive, script, calendar, email, shortcut, APK, installer, or executable attachments support Malware Distribution when the screenshot asks the user to open or run them.",
+    "source": "CISA phishing signs; Microsoft phishing trends",
+    "retrieval_terms": [
+      "PDF attachment",
+      "Word attachment",
+      "Excel attachment",
+      "ZIP",
+      "script",
+      "calendar invite",
+      "EML",
+      "APK",
+      "installer",
+      "executable"
+    ],
+    "polarity": "supporting"
+  },
+  {
+    "id": "malware_distribution_006",
+    "category": "malware_distribution",
+    "knowledge_type": "specialised_technique",
+    "text": "A CAPTCHA, error, document preview, or verification page that instructs the user to run commands or install software can be a malware-delivery step.",
+    "source": "Microsoft ClickFix research",
+    "retrieval_terms": [
+      "CAPTCHA",
+      "fake error",
+      "document preview",
+      "verification page",
+      "run command",
+      "install software"
+    ],
+    "polarity": "supporting"
+  },
+  {
+    "id": "malware_distribution_007",
+    "category": "malware_distribution",
+    "knowledge_type": "common_target",
+    "text": "Malware-delivery lures include invoices, tax forms, shipping documents, resumes, cloud documents, software updates, security alerts, meeting invitations, and media files.",
+    "source": "Microsoft phishing trends",
+    "retrieval_terms": [
+      "invoice attachment",
+      "tax form",
+      "shipping document",
+      "resume",
+      "cloud document",
+      "software update",
+      "meeting invitation",
+      "media file"
+    ],
+    "polarity": "supporting"
+  },
+  {
+    "id": "malware_distribution_008",
+    "category": "malware_distribution",
+    "knowledge_type": "negative_rule",
+    "text": "A generic Download, View, Open, Continue, or Update button does not by itself prove Malware Distribution when no file type, installation, execution, attachment, or command instruction is visible.",
+    "source": "Project false-positive control",
+    "retrieval_terms": [
+      "download button only",
+      "view button",
+      "open button",
+      "continue button",
+      "update button only"
+    ],
+    "polarity": "counterexample"
+  },
+  {
+    "id": "malware_distribution_009",
+    "category": "malware_distribution",
+    "knowledge_type": "negative_rule",
+    "text": "Downloading an ordinary PDF, image, receipt, statement, or known application from a legitimate context is not automatically malware distribution.",
+    "source": "Project false-positive control",
+    "retrieval_terms": [
+      "ordinary PDF",
+      "image download",
+      "receipt",
+      "statement",
+      "known application"
+    ],
+    "polarity": "counterexample"
+  },
+  {
+    "id": "malware_distribution_010",
+    "category": "malware_distribution",
+    "knowledge_type": "evidence_rule",
+    "text": "Strong Malware Distribution evidence names the visible file, file type, installation instruction, execution action, macro request, security bypass, or command.",
+    "source": "Project evidence policy",
+    "retrieval_terms": [
+      "file type",
+      "installation instruction",
+      "execution action",
+      "macro",
+      "security bypass",
+      "command"
+    ],
+    "polarity": "constraint"
+  },
+  {
+    "id": "malware_distribution_011",
+    "category": "malware_distribution",
+    "knowledge_type": "multi_label_rule",
+    "text": "A malicious attachment or fake update that also asks for login credentials can support Malware Distribution and Credential Theft when both behaviours are visible.",
+    "source": "Project multi-label policy",
+    "retrieval_terms": [
+      "attachment and password",
+      "update and login",
+      "download and credentials"
+    ],
+    "polarity": "supporting"
+  },
+  {
+    "id": "malware_distribution_012",
+    "category": "malware_distribution",
+    "knowledge_type": "abstention_rule",
+    "text": "If the screenshot only advertises a product or states that an update is available, without a suspicious download, install, run, enable, or command action, abstain from Malware Distribution.",
+    "source": "Project abstention policy",
+    "retrieval_terms": [
+      "product advert",
+      "update available only",
+      "no install",
+      "no run"
+    ],
+    "polarity": "constraint"
+  },
+  {
+    "id": "personal_information_harvesting_001",
     "category": "personal_information_harvesting",
-    "text": "Personal information harvesting indicators include address, phone, date of birth, identity number, passport, tax ID, employment, demographic or health data."
+    "knowledge_type": "primary_feature",
+    "text": "Visible requests for full name, home address, telephone number, date of birth, place of birth, nationality, or demographic details support Personal Information Harvesting when the context is suspicious.",
+    "source": "CISA phishing signs; Microsoft phishing protection",
+    "retrieval_terms": [
+      "full name",
+      "home address",
+      "phone number",
+      "date of birth",
+      "place of birth",
+      "nationality",
+      "demographic"
+    ],
+    "polarity": "supporting"
+  },
+  {
+    "id": "personal_information_harvesting_002",
+    "category": "personal_information_harvesting",
+    "knowledge_type": "primary_feature",
+    "text": "Visible requests for passport, national ID, social-security or national-insurance number, tax identifier, driver licence, voter ID, employee ID, or identity-document upload support Personal Information Harvesting.",
+    "source": "Microsoft phishing protection",
+    "retrieval_terms": [
+      "passport",
+      "national ID",
+      "social security",
+      "national insurance",
+      "tax ID",
+      "driver licence",
+      "voter ID",
+      "employee ID",
+      "upload ID"
+    ],
+    "polarity": "supporting"
+  },
+  {
+    "id": "personal_information_harvesting_003",
+    "category": "personal_information_harvesting",
+    "knowledge_type": "primary_feature",
+    "text": "Visible requests for employment, salary, education, family, health, insurance, biometric, or medical information support Personal Information Harvesting when unrelated to an expected legitimate process or already within a known phishing scope.",
+    "source": "Project taxonomy",
+    "retrieval_terms": [
+      "employment",
+      "salary",
+      "education",
+      "family",
+      "health",
+      "insurance",
+      "biometric",
+      "medical"
+    ],
+    "polarity": "supporting"
+  },
+  {
+    "id": "personal_information_harvesting_004",
+    "category": "personal_information_harvesting",
+    "knowledge_type": "distinctive_indicator",
+    "text": "Identity-verification or KYC pages that request several identifiers, document images, selfies, addresses, dates of birth, or contact details can support Personal Information Harvesting.",
+    "source": "Project evidence policy",
+    "retrieval_terms": [
+      "KYC",
+      "identity verification",
+      "document upload",
+      "selfie",
+      "proof of address",
+      "date of birth"
+    ],
+    "polarity": "supporting"
+  },
+  {
+    "id": "personal_information_harvesting_005",
+    "category": "personal_information_harvesting",
+    "knowledge_type": "specialised_technique",
+    "text": "Prize, survey, benefits, tax, job, delivery, refund, insurance, and account-recovery lures can harvest personal information when the screenshot visibly requests identity or contact data.",
+    "source": "CISA; CIS phishing guidance",
+    "retrieval_terms": [
+      "prize",
+      "survey",
+      "benefits",
+      "tax",
+      "job application",
+      "delivery",
+      "refund",
+      "insurance",
+      "account recovery"
+    ],
+    "polarity": "supporting"
+  },
+  {
+    "id": "personal_information_harvesting_006",
+    "category": "personal_information_harvesting",
+    "knowledge_type": "specialised_technique",
+    "text": "A form requesting unrelated or excessive identity details, such as passport and tax ID for a simple parcel fee, is stronger harvesting evidence than an expected minimal contact field.",
+    "source": "Project evidence policy",
+    "retrieval_terms": [
+      "excessive data",
+      "unrelated information",
+      "passport for delivery",
+      "tax ID for parcel"
+    ],
+    "polarity": "supporting"
+  },
+  {
+    "id": "personal_information_harvesting_007",
+    "category": "personal_information_harvesting",
+    "knowledge_type": "common_target",
+    "text": "Personal-information targets include identity, contact, demographic, employment, government, tax, insurance, healthcare, education, and family data.",
+    "source": "Base-paper specialist repository concept",
+    "retrieval_terms": [
+      "identity data",
+      "contact data",
+      "demographic",
+      "employment",
+      "government ID",
+      "tax",
+      "insurance",
+      "healthcare",
+      "education",
+      "family"
+    ],
+    "polarity": "supporting"
+  },
+  {
+    "id": "personal_information_harvesting_008",
+    "category": "personal_information_harvesting",
+    "knowledge_type": "negative_rule",
+    "text": "A single name, contact-email, telephone, billing-address, delivery-address, or profile field can be legitimate. Do not assign Personal Information Harvesting solely from ordinary form presence.",
+    "source": "Project false-positive control",
+    "retrieval_terms": [
+      "single name field",
+      "contact email",
+      "telephone field",
+      "billing address",
+      "delivery address",
+      "profile field"
+    ],
+    "polarity": "counterexample"
+  },
+  {
+    "id": "personal_information_harvesting_009",
+    "category": "personal_information_harvesting",
+    "knowledge_type": "negative_rule",
+    "text": "A Confirm My Identity button or identity-warning message without visible personal-data fields or document requests is insufficient by itself for Personal Information Harvesting.",
+    "source": "Project false-positive control",
+    "retrieval_terms": [
+      "confirm identity button",
+      "identity warning",
+      "no personal fields",
+      "no document request"
+    ],
+    "polarity": "counterexample"
+  },
+  {
+    "id": "personal_information_harvesting_010",
+    "category": "personal_information_harvesting",
+    "knowledge_type": "evidence_rule",
+    "text": "Strong Personal Information Harvesting evidence identifies the exact visible personal field, identity number, requested document, upload control, or excessive combination of fields.",
+    "source": "Project evidence policy",
+    "retrieval_terms": [
+      "exact personal field",
+      "identity number",
+      "requested document",
+      "upload control",
+      "multiple fields"
+    ],
+    "polarity": "constraint"
+  },
+  {
+    "id": "personal_information_harvesting_011",
+    "category": "personal_information_harvesting",
+    "knowledge_type": "multi_label_rule",
+    "text": "Login secrets plus personal identity fields support Credential Theft and Personal Information Harvesting; payment details plus identity data support Financial Fraud and Personal Information Harvesting.",
+    "source": "Project multi-label policy",
+    "retrieval_terms": [
+      "credentials and identity",
+      "payment and identity",
+      "multi-label"
+    ],
+    "polarity": "supporting"
+  },
+  {
+    "id": "personal_information_harvesting_012",
+    "category": "personal_information_harvesting",
+    "knowledge_type": "abstention_rule",
+    "text": "If personal information is implied but not visibly requested on the current screenshot, do not infer harvesting from a possible later form.",
+    "source": "Project abstention policy",
+    "retrieval_terms": [
+      "personal data implied",
+      "later form",
+      "not visible",
+      "do not infer"
+    ],
+    "polarity": "constraint"
   }
 ]

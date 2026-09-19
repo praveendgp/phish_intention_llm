@@ -1,0 +1,23 @@
+
+[
+  {
+    "id": "k1",
+    "category": "credential_theft",
+    "text": "Credential theft indicators include username, email, password, PIN, OTP, security answer, recovery code and sign-in forms."
+  },
+  {
+    "id": "k2",
+    "category": "financial_fraud",
+    "text": "Financial fraud indicators include card number, CVV, expiry, bank account, transfer, payment, invoice, cryptocurrency, reward or investment solicitation."
+  },
+  {
+    "id": "k3",
+    "category": "malware_distribution",
+    "text": "Malware distribution indicators include download, install, update, APK, executable, attachment, document viewer, antivirus alert or software prompt."
+  },
+  {
+    "id": "k4",
+    "category": "personal_information_harvesting",
+    "text": "Personal information harvesting indicators include address, phone, date of birth, identity number, passport, tax ID, employment, demographic or health data."
+  }
+]
