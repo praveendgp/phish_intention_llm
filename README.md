@@ -1,6 +1,6 @@
 # PhishIntentionLLM Two-Dataset Reproduction
 
-Defensive M.Tech implementation of the five-layer workflow in the base paper, restricted to:
+Implementation of the five-layer workflow in the base paper:
 
 1. Phish-IRIS: https://data.mendeley.com/datasets/tk4fkswtj5/1
 2. Putra Phishing Website Dataset: https://zenodo.org/records/8041387
