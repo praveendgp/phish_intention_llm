@@ -17,6 +17,7 @@ src/phishintention/schema.py
 src/phishintention/annotators/__init__.py
 src/phishintention/annotators/consensus.py
 src/phishintention/annotators/gemini_annotator.py
+src/phishintention/annotators/groq_adjudicator.py
 src/phishintention/annotators/openai_annotator.py
 src/phishintention/annotators/prompt.py
 src/phishintention/annotators/schemas.py
