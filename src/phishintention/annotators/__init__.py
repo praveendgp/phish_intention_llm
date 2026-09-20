@@ -14,6 +14,10 @@ from .ollama_adjudicator import (
     OllamaAdjudicator,
 )
 
+from .ollama_annotator import (
+    LocalAnnotationOutput,
+    OllamaAnnotator,
+)
 
 __all__ = [
     "AnnotationOutput",
@@ -22,4 +26,6 @@ __all__ = [
     "GeminiAnnotator",
     "OllamaAdjudicator",
     "OllamaAdjudicationOutput",
+    "OllamaAnnotator",
+    "LocalAnnotationOutput",
 ]

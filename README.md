@@ -1,122 +1,147 @@
 # PhishIntentionLLM
 
-A defensive, screenshot-based multi-agent Retrieval-Augmented Generation system for identifying the likely intentions of known phishing webpages.
-
-The project predicts one or more of four labels:
+PhishIntentionLLM is a defensive screenshot-based multi-agent Retrieval-Augmented Generation system that predicts one or more intentions of a known phishing webpage:
 
 - `credential_theft`
 - `financial_fraud`
 - `malware_distribution`
 - `personal_information_harvesting`
 
-This repository uses the earlier custom Python implementation in `pipeline.py`. It does not use LangChain or LangGraph.
+The repository uses custom Python orchestration in `src/phishintention/pipeline.py`. It does not use LangChain or LangGraph.
 
 ## Responsible-use boundary
 
-This project is intended only for defensive cybersecurity research using static, released research data. It does not crawl live phishing websites, execute archived HTML, collect credentials, or generate phishing content.
+This project analyses static screenshots for defensive research. It does not crawl live phishing websites, execute archived HTML, collect credentials, or generate phishing content. The four-intention pipeline should normally receive screenshots already known to be phishing. A normal login, payment, download, registration, or identity-verification screen is not sufficient by itself to prove malicious intent.
+
+## Dataset update: the new dataset is the only active dataset
+
+The project no longer uses the previous Phish-IRIS or Putra datasets. Remove those datasets from the active workspace after the migration backup is created.
+
+The only active dataset is:
+
+```text
+Phishing dataset/
+├── image/
+│   ├── train/
+│   │   ├── legitimate/
+│   │   └── phishing/
+│   ├── val/
+│   │   ├── legitimate/
+│   │   └── phishing/
+│   └── test/
+│       ├── legitimate/
+│       └── phishing/
+└── url/
+```
+
+Dataset rules:
+
+- Preserve the provided `train`, `val`, and `test` splits.
+- Each split contains `legitimate` and `phishing` classes.
+- Only `phishing` screenshots enter the four-intention annotation workflow.
+- `legitimate` screenshots remain in `manifest.csv` with `annotation_status=not_applicable` and all four intention labels set to `0`.
+- The optional `url/` directory is preserved as metadata but is not consumed by the screenshot-only VLM pipeline.
+- Stable sample IDs are derived from `phishing_dataset:<relative_image_path>`.
+- Old manifests, annotations, agreement files, review queues, predictions, and metrics must not be reused because those artefacts reference the removed datasets and old sample IDs.
+
+The active source name is:
+
+```text
+phishing_dataset
+```
+
+After generating the manifest, verify that no legacy source remains:
+
+```bash
+python - <<'PY2'
+import pandas as pd
+
+df = pd.read_csv("data/processed/manifest.csv").fillna("")
+print(df["source"].value_counts(dropna=False))
+unexpected = sorted(set(df["source"]) - {"phishing_dataset"})
+if unexpected:
+    raise SystemExit(f"Unexpected legacy sources: {unexpected}")
+print("Manifest contains only the new dataset source.")
+PY2
+```
+
+---
 
 ## Architecture
 
 ```text
 Screenshot
-   ↓
-Vision Analysis Agent
-   ↓
-Common-threat TF-IDF retrieval
-   ↓
-Initial multi-label classifier
-   ↓
-Selected category specialists
-   ↓
-Category-specific TF-IDF retrieval
-   ↓
-Validation and evidence synthesis
-   ↓
-Final labels, confidence and trace
+  → Vision Analysis Agent
+  → TF-IDF retrieval from common threat KB
+  → Initial multi-label classifier
+  → Selected intention specialists
+  → Category-specific TF-IDF retrieval
+  → Validation and evidence synthesis
+  → Labels, confidence, evidence and trace
 ```
 
-Inference modes:
+Modes:
 
 - `single`: single-agent baseline
-- `always`: invoke every specialist
-- `gated`: invoke likely specialists and use confidence-aware feedback
+- `always`: all four specialists
+- `gated`: relevant specialists with confidence-aware validation
 
-## Annotation and evaluation design
+## Local annotation and evaluation design
 
 ```text
-OpenAI GPT-4.1 Mini
-          +
-Gemini 3.8 Flash
-          ↓
-OpenAI/Gemini agreement
-          ↓ disagreements
-Local Gemma 3 12B through Ollama
-          ↓
-Mandatory human review
-          ↓
-final_adjudicated.csv
-          ↓
-manifest.csv ground truth
-          ↓
-Evaluate Qwen2.5-VL pipeline
+Gemma 3 12B + MiniCPM-V 8B
+              ↓
+       Agreement comparison
+              ↓ disputed labels only
+   Mistral Small 3.1 24B
+              ↓
+       Mandatory human review
+              ↓
+       final_adjudicated.csv
+              ↓
+        Apply to manifest.csv
+              ↓
+  Evaluate Qwen2.5-VL pipeline
 ```
 
-`Groq` and `Llama 3.2 Vision` are no longer active dependencies:
+Roles:
 
-- Groq was removed because its hosted tie-breaker reached remote token quotas.
-- `llama3.2-vision:11b` was removed because the installed Ollama runner returned `unknown model architecture: 'mllama'`.
-- The active local tie-breaker is `gemma3:12b`.
-- Historical Groq results should be archived, not relabelled or deleted, because they preserve provenance.
+- `gemma3:12b`: primary local annotator A
+- `minicpm-v:8b`: primary local annotator B
+- `mistral-small3.1:24b`: provisional tie-breaker for disputed labels
+- human reviewer: final ground-truth authority
+- `qwen2.5vl:72b`: evaluated model
 
-Every machine tie-breaker result must remain `requires_human_review=True`. Only a completed human review may produce final adjudicated ground truth.
+Mistral must not overwrite labels on which the primary annotators agree. Every Mistral-resolved row remains `requires_human_review=True` until reviewed.
 
 ---
 
-# 1. Project structure
+# First-time setup
 
-```text
-PhishIntentionLLM/
-├── app.py
-├── README.md
-├── requirements.txt
-├── pyproject.toml
-├── .env
-├── src/phishintention/
-│   ├── pipeline.py
-│   ├── retrieval.py
-│   ├── metrics.py
-│   └── annotators/
-│       ├── openai_annotator.py
-│       ├── gemini_annotator.py
-│       ├── ollama_adjudicator.py
-│       ├── consensus.py
-│       └── schemas.py
-├── scripts/
-│   ├── prepare_data.py
-│   ├── annotate_llm.py
-│   ├── calculate_annotation_agreement.py
-│   ├── retry_failed_ollama.py
-│   ├── finalise_annotations.py
-│   ├── apply_adjudicated_labels.py
-│   ├── predict.py
-│   ├── evaluate.py
-│   └── run_ablation.py
-├── knowledge/
-│   ├── common.json
-│   └── specialists.json
-├── data/
-│   ├── raw/
-│   ├── processed/manifest.csv
-│   └── annotations/
-└── outputs/
+## 1. Prerequisites
+
+Install Python 3.11, Git, Ollama, and the new phishing screenshot dataset.
+
+```bash
+brew install ollama
 ```
 
----
-
-# 2. Environment setup
+## 2. Enter the project
 
 ```bash
 cd "/Users/praks4/Workspace/Personal/mtech_project/PhishIntentionLLM"
+```
+
+For a new clone:
+
+```bash
+git clone <repository-url>
+cd PhishIntentionLLM
+```
+
+## 3. Create the environment
+
+```bash
 python3.11 -m venv .venv
 source .venv/bin/activate
 python -m pip install --upgrade pip
@@ -124,7 +149,7 @@ python -m pip install -r requirements.txt
 python -m pip install -e .
 ```
 
-Validate the environment:
+Validate:
 
 ```bash
 which python
@@ -133,101 +158,60 @@ python -m compileall -q src scripts tests
 python -m pytest -q
 ```
 
-The interpreter path should point to `.venv`.
+The fully local workflow needs packages including `pandas`, `numpy`, `Pillow`, `pydantic`, `python-dotenv`, `requests`, `scikit-learn`, `streamlit`, and `pytest`. OpenAI, Gemini, and Groq SDKs are not required by the active workflow.
 
-## Active dependencies
-
-The requirements should include at least:
-
-```text
-pandas
-numpy
-Pillow
-pydantic
-python-dotenv
-requests
-scikit-learn
-streamlit
-pytest
-openai
-google-genai
-```
-
-The `groq` package is no longer required:
-
-```bash
-python -m pip uninstall -y groq
-```
-
----
-
-# 3. Environment variables
-
-Create or update `.env`:
+## 4. Configure `.env`
 
 ```dotenv
-# Main evaluated Qwen pipeline
 OLLAMA_BASE_URL=http://localhost:11434
+
+# Evaluated model
 OLLAMA_MODEL=qwen2.5vl:72b
+
+# Main pipeline
 CONFIDENCE_THRESHOLD=0.55
 TOP_K=3
-MAX_IMAGE_SIDE=1280
+MAX_IMAGE_WIDTH=1280
+MAX_IMAGE_HEIGHT=4096
 
-# OpenAI primary annotator
-OPENAI_API_KEY=
-OPENAI_ANNOTATION_MODEL=gpt-4.1-mini-2025-04-14
+# Primary annotators
+OLLAMA_ANNOTATOR_1_NAME=gemma
+OLLAMA_ANNOTATOR_1_MODEL=gemma3:12b
+OLLAMA_ANNOTATOR_2_NAME=minicpm
+OLLAMA_ANNOTATOR_2_MODEL=minicpm-v:8b
 
-# Gemini primary annotator
-GEMINI_API_KEY=
-GEMINI_ANNOTATION_MODEL=gemini-3.8-flash
-GEMINI_ANNOTATION_MAX_RETRIES=3
-GEMINI_ANNOTATION_MAX_OUTPUT_TOKENS=1800
+# Provisional tie-breaker
+OLLAMA_ADJUDICATOR_NAME=mistral
+OLLAMA_ADJUDICATION_MODEL=mistral-small3.1:24b
 
-# Local Ollama tie-breaker
-OLLAMA_ADJUDICATION_MODEL=gemma3:12b
-OLLAMA_ADJUDICATION_TIMEOUT=600
+# Request controls
+OLLAMA_ANNOTATION_TIMEOUT=900
+OLLAMA_ANNOTATION_MAX_RETRIES=2
+OLLAMA_ADJUDICATION_TIMEOUT=900
 OLLAMA_ADJUDICATION_MAX_RETRIES=2
-```
-
-Remove obsolete active settings:
-
-```dotenv
-# Remove these if present
-GROQ_API_KEY=
-GROQ_ADJUDICATION_MODEL=
-GROQ_MAX_RETRIES=
-GROQ_REQUEST_TIMEOUT_SECONDS=
-GROQ_RETRY_DELAY_SECONDS=
+OLLAMA_USE_JSON_SCHEMA=true
 ```
 
 Do not commit `.env`.
 
----
-
-# 4. Ollama setup
-
-Install and start Ollama:
+## 5. Start Ollama and pull models
 
 ```bash
-brew install ollama
 brew services start ollama
 ```
 
-Or run:
+Or:
 
 ```bash
 ollama serve
 ```
 
-Pull the local adjudication model:
+Pull models:
 
 ```bash
 ollama pull gemma3:12b
-```
-
-Pull the main evaluation model if it is not already installed:
-
-```bash
+ollama pull minicpm-v:8b
+ollama pull mistral-small3.1:24b
 ollama pull qwen2.5vl:72b
 ```
 
@@ -236,94 +220,131 @@ Verify:
 ```bash
 ollama --version
 ollama list
+ollama ps
 curl -s http://localhost:11434/api/tags | python -m json.tool
 ```
 
-## Test Gemma text inference
-
-```bash
-curl -s http://localhost:11434/api/chat \
-  -H "Content-Type: application/json" \
-  -d '{
-    "model": "gemma3:12b",
-    "messages": [
-      {
-        "role": "user",
-        "content": "Reply with OK."
-      }
-    ],
-    "stream": false
-  }' \
-  | python -m json.tool
-```
-
-## Test Gemma vision inference
-
-```bash
-IMAGE_PATH="/absolute/path/to/screenshot.jpg"
-IMAGE_BASE64=$(base64 < "$IMAGE_PATH" | tr -d '\n')
-
-curl -sS http://localhost:11434/api/chat \
-  -H "Content-Type: application/json" \
-  -d "{
-    \"model\": \"gemma3:12b\",
-    \"messages\": [
-      {
-        \"role\": \"user\",
-        \"content\": \"List only visible input fields, buttons, requested information and requested actions. Do not infer a later page.\",
-        \"images\": [\"$IMAGE_BASE64\"]
-      }
-    ],
-    \"stream\": false,
-    \"options\": {
-      \"temperature\": 0,
-      \"num_predict\": 300,
-      \"num_ctx\": 4096
-    }
-  }" \
-  | python -m json.tool
-```
-
-Monitor loaded models:
-
-```bash
-ollama ps
-```
-
-To release a large model before local adjudication:
-
-```bash
-ollama stop qwen2.5vl:72b
-```
+Avoid keeping all large models loaded simultaneously.
 
 ---
 
-# 5. Dataset preparation
+# New dataset
 
-Expected raw-data layout:
+## 6. Required layout
+
+The former Phish-IRIS and Putra datasets are removed from the active workflow. The project now uses:
 
 ```text
-data/raw/
-├── phish_iris/
-└── putra/
+<dataset-root>/
+├── image/
+│   ├── train/
+│   │   ├── legitimate/
+│   │   └── phishing/
+│   ├── val/
+│   │   ├── legitimate/
+│   │   └── phishing/
+│   └── test/
+│       ├── legitimate/
+│       └── phishing/
+└── url/                         # Optional metadata, not used for image inference
 ```
 
-Back up the manifest before regenerating it:
+Supported image extensions are `.png`, `.jpg`, `.jpeg`, `.webp`, `.bmp`, and `.gif`.
+
+## 7. Migrate the repository
+
+Copy and compile the migration script:
 
 ```bash
-cp data/processed/manifest.csv \
-   data/processed/manifest_backup.csv
+cp "/path/to/migrate_to_new_dataset.py" scripts/migrate_to_new_dataset.py
+python -m py_compile scripts/migrate_to_new_dataset.py
 ```
 
-Generate the manifest:
+Dry run:
+
+```bash
+python scripts/migrate_to_new_dataset.py \
+  --project-root . \
+  --dataset-root "/absolute/path/to/Phishing dataset" \
+  --source-name phishing_dataset \
+  --dry-run
+```
+
+Apply migration:
+
+```bash
+python scripts/migrate_to_new_dataset.py \
+  --project-root . \
+  --dataset-root "/absolute/path/to/Phishing dataset" \
+  --source-name phishing_dataset \
+  --create-dataset-symlink \
+  --archive-outputs \
+  --remove-old-raw
+```
+
+The migration:
+
+- validates all six class folders;
+- backs up the README, manifest, preparation script, annotations and optional outputs;
+- replaces the old dataset-specific `prepare_data.py`;
+- resets prior annotations because sample IDs no longer match;
+- creates stable IDs from source name and relative image path;
+- generates the new manifest;
+- optionally removes the previous raw datasets;
+- optionally links `data/raw/phishing_dataset` to the external dataset;
+- writes `migration_report.json`.
+
+Backups are stored under `migration_backups/`.
+
+After migration, these legacy dataset folders must not remain active:
+
+```text
+data/raw/phish_iris
+data/raw/putra
+```
+
+Verify removal:
+
+```bash
+for path in data/raw/phish_iris data/raw/putra; do
+  if [ -e "$path" ]; then
+    echo "Legacy dataset still exists: $path"
+  fi
+done
+```
+
+No output is expected.
+
+## 8. Generate the manifest directly
 
 ```bash
 python scripts/prepare_data.py \
-  --phish-iris data/raw/phish_iris \
-  --putra data/raw/putra
+  --dataset-root "/absolute/path/to/Phishing dataset" \
+  --output data/processed/manifest.csv \
+  --source-name phishing_dataset
 ```
 
-Validate the indexed images:
+Phishing rows receive:
+
+```text
+phishing_status = phishing
+annotation_status = unlabelled
+```
+
+Legitimate rows receive:
+
+```text
+phishing_status = legitimate
+annotation_status = not_applicable
+credential_theft = 0
+financial_fraud = 0
+malware_distribution = 0
+personal_information_harvesting = 0
+```
+
+Only known phishing screenshots enter the four-intention annotation workflow. Legitimate images are retained for reference or a separate phishing-detection experiment.
+
+## 9. Validate the manifest
 
 ```bash
 python - <<'PY'
@@ -331,37 +352,76 @@ from pathlib import Path
 import pandas as pd
 
 df = pd.read_csv("data/processed/manifest.csv").fillna("")
-missing = df[~df["image_path"].map(lambda value: Path(str(value)).exists())]
+missing = df[~df["image_path"].map(lambda x: Path(str(x)).exists())]
 
-print("Manifest rows:", len(df))
-print("Unique images:", df["image_path"].nunique())
-print("Missing images:", len(missing))
-print("\nBy source:")
-print(df.groupby("source")["image_path"].nunique())
+print("Total records:", len(df))
+print("Unique sample IDs:", df["sample_id"].nunique())
+print("Unique image paths:", df["image_path"].nunique())
+print("\nCounts by split and class:")
+print(df.groupby(["split", "dataset_class"]).size().to_string())
+print("\nMissing image paths:", len(missing))
+print("Phishing annotation candidates:", int((df["annotation_status"] == "unlabelled").sum()))
+print("Legitimate reference records:", int((df["annotation_status"] == "not_applicable").sum()))
 PY
 ```
 
-`manifest.csv` is the dataset index and final ground-truth registry. It is not the RAG knowledge base.
+Required checks:
+
+```text
+Total records = Unique sample IDs
+Total records = Unique image paths
+Missing image paths = 0
+```
 
 ---
 
-# 6. Knowledge base and RAG
+# Git configuration
 
-The RAG knowledge is stored in:
+## 10. Update `.gitignore`
 
-```text
-knowledge/common.json
-knowledge/specialists.json
+```bash
+cp "/path/to/update_gitignore.py" scripts/update_gitignore.py
+python scripts/update_gitignore.py --project-root . --dry-run
+python scripts/update_gitignore.py --project-root .
 ```
 
-- `common.json` contains common phishing patterns, boundary rules, abstention rules and benign counterexamples.
-- `specialists.json` contains category-specific knowledge for the four intentions.
-- `retrieval.py` performs TF-IDF indexing and cosine-similarity retrieval.
-- Extracted screenshot evidence becomes the retrieval query.
-- Common entries ground the initial classifier.
-- Category-filtered specialist entries ground each selected specialist.
+The generated rules ignore raw or linked datasets, generated manifests, annotations, outputs, migration backups, experiment archives, secrets, virtual environments, and local model files. Source code, tests, README files, `knowledge/*.json`, `.env.example`, and `.gitkeep` placeholders remain trackable.
 
-Validate KB counts:
+`.gitignore` does not untrack files that were committed earlier. Inspect and untrack generated artefacts:
+
+```bash
+git ls-files data/raw data/processed data/annotations outputs migration_backups experiments archive
+
+git rm -r --cached \
+  data/raw data/processed data/annotations outputs \
+  migration_backups experiments archive \
+  2>/dev/null || true
+
+git add \
+  data/raw/.gitkeep \
+  data/processed/.gitkeep \
+  data/annotations/.gitkeep \
+  outputs/.gitkeep
+
+git status --short
+```
+
+Validate representative rules:
+
+```bash
+git check-ignore -v \
+  data/processed/manifest.csv \
+  data/annotations/ollama_gemma_annotations.jsonl \
+  data/annotations/local/final_adjudicated.csv \
+  outputs/predictions_gated.jsonl \
+  data/raw/phishing_dataset
+```
+
+---
+
+# Knowledge base and UI
+
+## 11. Validate the RAG KB
 
 ```bash
 python - <<'PY'
@@ -374,534 +434,397 @@ for path in sorted(Path("knowledge").glob("*.json")):
 PY
 ```
 
-Do not update the KB using final-test examples after inspecting their errors. Use development or validation examples, freeze the KB, and run final evaluation afterwards.
+The TF-IDF retrieval score ranks KB entries. It is not a classification probability.
+
+## 12. Start Streamlit
+
+Recommended:
+
+```bash
+python -m streamlit run app.py
+```
+
+Alternative:
+
+```bash
+streamlit run app.py
+```
+
+Because the annotation tab selects `annotation_status == "unlabelled"`, only phishing screenshots appear as pending. Legitimate screenshots are excluded because they are marked `not_applicable`.
 
 ---
 
-# 7. Independent primary annotation
+# Local annotation implementation
 
-## Pilot with OpenAI
+## 13. Shared schemas
 
-```bash
-python scripts/annotate_llm.py \
-  --provider openai \
-  --limit 10 \
-  --output-dir data/annotations
-```
-
-## Pilot with Gemini
-
-```bash
-python scripts/annotate_llm.py \
-  --provider gemini \
-  --limit 10 \
-  --output-dir data/annotations
-```
-
-Expected outputs:
+All providers must use the shared Pydantic models in:
 
 ```text
-data/annotations/openai_annotations.jsonl
-data/annotations/gemini_annotations.jsonl
+src/phishintention/annotators/schemas.py
 ```
 
-Run the full annotation after validating the pilot:
+Every annotation contains all four label decisions plus `image_quality`, `exclusion_reason`, and `annotation_notes`. Do not duplicate `LabelDecision` or `AnnotationOutput` classes in provider modules.
+
+## 14. Generic Ollama annotator
+
+`src/phishintention/annotators/ollama_annotator.py` must:
+
+- use the shared schema;
+- resize with separate maximum width and height;
+- preserve aspect ratio for tall webpages;
+- include `sample_id` in debug filenames;
+- expose Ollama response bodies on HTTP failure;
+- support JSON Schema mode and JSON fallback;
+- validate every response with Pydantic.
+
+Recommended bounds:
+
+```text
+maximum width = 1280
+maximum height = 4096
+```
+
+## 15. Local annotation script
+
+`scripts/annotate_ollama.py` supports:
+
+```text
+--provider-name
+--model
+--manifest
+--output-dir
+--limit
+--force
+```
+
+Resume order:
+
+```text
+Load manifest
+→ select phishing rows
+→ load completed IDs
+→ exclude completed rows
+→ apply --limit
+```
+
+Expected files:
+
+```text
+data/annotations/ollama_gemma_annotations.jsonl
+data/annotations/ollama_gemma_failures.jsonl
+data/annotations/ollama_minicpm_annotations.jsonl
+data/annotations/ollama_minicpm_failures.jsonl
+```
+
+## 16. Provider-neutral agreement
 
 ```bash
-python scripts/annotate_llm.py \
-  --provider openai \
-  --output-dir data/annotations
-
-python scripts/annotate_llm.py \
-  --provider gemini \
-  --output-dir data/annotations
+python scripts/calculate_annotation_agreement.py \
+  --annotation-a data/annotations/ollama_gemma_annotations.jsonl \
+  --annotation-b data/annotations/ollama_minicpm_annotations.jsonl \
+  --provider-a gemma \
+  --provider-b minicpm \
+  --output-dir data/annotations/local \
+  --create-image-links
 ```
 
-Do not use `--force` unless deliberately replacing a complete run.
+Expected output:
 
-Verify coverage:
+```text
+data/annotations/local/agreement.csv
+```
+
+## 17. Dedicated local adjudication
+
+Use `scripts/adjudicate_local_ollama.py`, not the old Groq retry script.
+
+The script must:
+
+1. load `agreement.csv`;
+2. create missing final columns;
+3. select label or image-quality disagreements;
+4. preserve agreed labels;
+5. ask Mistral only about disputed labels;
+6. merge direct agreements and provisional decisions;
+7. write `final_agreement.csv` without overwriting `agreement.csv`;
+8. maintain a Mistral cache and deduplicated failure log;
+9. set `requires_human_review=True` for Mistral-resolved rows.
+
+Use provider-neutral provenance:
+
+```text
+local_primary_agreement
+ollama_mistral_tiebreaker
+ollama_mistral_failed
+human_review
+```
+
+Use `adjudicator_model`, not `groq_model`.
+
+---
+
+# Run annotation
+
+## 18. Gemma pilot
+
+```bash
+ollama stop minicpm-v:8b
+ollama stop mistral-small3.1:24b
+ollama stop qwen2.5vl:72b
+
+python scripts/annotate_ollama.py \
+  --provider-name gemma \
+  --model gemma3:12b \
+  --limit 10
+```
+
+## 19. MiniCPM pilot
+
+```bash
+ollama stop gemma3:12b
+
+python scripts/annotate_ollama.py \
+  --provider-name minicpm \
+  --model minicpm-v:8b \
+  --limit 10
+```
+
+## 20. Verify equal coverage
 
 ```bash
 python - <<'PY'
 import json
 from pathlib import Path
 
-
 def ids(path):
     path = Path(path)
     if not path.exists():
         return set()
-    return {
-        json.loads(line)["sample_id"]
-        for line in path.read_text(encoding="utf-8").splitlines()
-        if line.strip()
-    }
+    return {json.loads(line)["sample_id"] for line in path.read_text().splitlines() if line.strip()}
 
-openai_ids = ids("data/annotations/openai_annotations.jsonl")
-gemini_ids = ids("data/annotations/gemini_annotations.jsonl")
-
-print("OpenAI:", len(openai_ids))
-print("Gemini:", len(gemini_ids))
-print("Shared:", len(openai_ids & gemini_ids))
-print("Missing from Gemini:", len(openai_ids - gemini_ids))
-print("Missing from OpenAI:", len(gemini_ids - openai_ids))
+gemma = ids("data/annotations/ollama_gemma_annotations.jsonl")
+minicpm = ids("data/annotations/ollama_minicpm_annotations.jsonl")
+print("Gemma:", len(gemma))
+print("MiniCPM:", len(minicpm))
+print("Shared:", len(gemma & minicpm))
+print("Only Gemma:", len(gemma - minicpm))
+print("Only MiniCPM:", len(minicpm - gemma))
 PY
 ```
 
----
+## 21. Full primary annotation
 
-# 8. Calculate OpenAI/Gemini agreement
+```bash
+ollama stop minicpm-v:8b
+ollama stop mistral-small3.1:24b
+ollama stop qwen2.5vl:72b
+python scripts/annotate_ollama.py --provider-name gemma --model gemma3:12b
+
+ollama stop gemma3:12b
+python scripts/annotate_ollama.py --provider-name minicpm --model minicpm-v:8b
+```
+
+## 22. Calculate agreement
 
 ```bash
 python scripts/calculate_annotation_agreement.py \
-  --openai data/annotations/openai_annotations.jsonl \
-  --gemini data/annotations/gemini_annotations.jsonl \
-  --output-dir data/annotations \
+  --annotation-a data/annotations/ollama_gemma_annotations.jsonl \
+  --annotation-b data/annotations/ollama_minicpm_annotations.jsonl \
+  --provider-a gemma \
+  --provider-b minicpm \
+  --output-dir data/annotations/local \
   --create-image-links
 ```
 
-Outputs:
-
-```text
-data/annotations/agreement.csv
-data/annotations/agreement_metrics.json
-data/annotations/adjudication_queue.csv
-data/annotations/adjudication_images/
-```
-
-Inspect:
+## 23. Mistral adjudication
 
 ```bash
-cat data/annotations/agreement_metrics.json
-open data/annotations/adjudication_images
+ollama stop gemma3:12b
+ollama stop minicpm-v:8b
+ollama stop qwen2.5vl:72b
+```
+
+Pilot:
+
+```bash
+python scripts/adjudicate_local_ollama.py \
+  --agreement data/annotations/local/agreement.csv \
+  --output data/annotations/local/final_agreement.csv \
+  --annotation-a data/annotations/ollama_gemma_annotations.jsonl \
+  --annotation-b data/annotations/ollama_minicpm_annotations.jsonl \
+  --provider-a gemma \
+  --provider-b minicpm \
+  --model mistral-small3.1:24b \
+  --limit 10 \
+  --sleep 0
+```
+
+Full run:
+
+```bash
+python scripts/adjudicate_local_ollama.py \
+  --agreement data/annotations/local/agreement.csv \
+  --output data/annotations/local/final_agreement.csv \
+  --annotation-a data/annotations/ollama_gemma_annotations.jsonl \
+  --annotation-b data/annotations/ollama_minicpm_annotations.jsonl \
+  --provider-a gemma \
+  --provider-b minicpm \
+  --model mistral-small3.1:24b \
+  --sleep 0
 ```
 
 ---
 
-# 9. Local Ollama tie-breaking with Gemma 3
+# Human approval
 
-The active tie-breaker is:
-
-```text
-gemma3:12b
-```
-
-Use only the failed or unresolved rows. The script should select source values such as:
-
-```text
-groq_failed
-groq_failed_previous_run
-ollama_failed
-```
-
-Historical values named `groq_failed` remain valid provenance indicating how the earlier operation failed. Successful local retries should be written as:
-
-```text
-adjudication_source = ollama_gemma3_tiebreaker
-requires_human_review = True
-```
-
-## Test one failed row
-
-```bash
-python scripts/retry_failed_ollama.py \
-  --sample-id 1a706ce3445291ee \
-  --model gemma3:12b \
-  --sleep 0
-```
-
-## Retry all remaining failed rows
-
-```bash
-python scripts/retry_failed_ollama.py \
-  --model gemma3:12b \
-  --sleep 0
-```
-
-Use separate local provenance files:
-
-```text
-data/annotations/ollama_adjudications.jsonl
-data/annotations/ollama_adjudication_failures.jsonl
-```
-
-The local script should update:
-
-```text
-data/annotations/final_agreement.csv
-```
-
-## Check unresolved rows
+## 24. Generate the review queue
 
 ```bash
 python - <<'PY'
 import pandas as pd
 
-df = pd.read_csv("data/annotations/final_agreement.csv").fillna("")
-
-failed_sources = {
-    "groq_failed",
-    "groq_failed_previous_run",
-    "ollama_failed",
-}
-
-remaining = df[df["adjudication_source"].astype(str).isin(failed_sources)]
-
-print("Remaining failed rows:", len(remaining))
-
-if not remaining.empty:
-    print(
-        remaining[
-            [
-                "sample_id",
-                "image_path",
-                "disagreement_labels",
-                "final_annotation_notes",
-            ]
-        ].to_string(index=False)
-    )
-PY
-```
-
----
-
-# 10. Historical Groq artefacts
-
-Groq is no longer an active runtime dependency, but historical artefacts should be preserved:
-
-```bash
-mkdir -p data/annotations/archive/groq
-
-mv data/annotations/groq_adjudications.jsonl \
-   data/annotations/archive/groq/ \
-   2>/dev/null || true
-
-mv data/annotations/groq_adjudication_failures.jsonl \
-   data/annotations/archive/groq/ \
-   2>/dev/null || true
-```
-
-Do not globally replace old source labels such as `groq_tiebreaker`. They accurately record how those provisional results were produced.
-
-Archive Groq code rather than deleting it immediately:
-
-```bash
-mkdir -p archive/groq
-
-mv src/phishintention/annotators/groq_adjudicator.py \
-   archive/groq/ \
-   2>/dev/null || true
-
-mv scripts/groq_adjudicate.py \
-   archive/groq/ \
-   2>/dev/null || true
-
-mv scripts/retry_failed_groq.py \
-   archive/groq/ \
-   2>/dev/null || true
-```
-
-Remove Groq exports from `src/phishintention/annotators/__init__.py` and retain:
-
-```python
-from .ollama_adjudicator import (
-    OllamaAdjudicationOutput,
-    OllamaAdjudicator,
-)
-```
-
----
-
-# 11. Generate the human-review queue
-
-Back up an existing queue:
-
-```bash
-cp data/annotations/human_review_queue.csv \
-   data/annotations/human_review_queue_backup.csv \
-   2>/dev/null || true
-```
-
-Generate a fresh queue from the latest final agreement:
-
-```bash
-python - <<'PY'
-import pandas as pd
-
-source = "data/annotations/final_agreement.csv"
-target = "data/annotations/human_review_queue.csv"
-
+source = "data/annotations/local/final_agreement.csv"
+target = "data/annotations/local/human_review_queue.csv"
 df = pd.read_csv(source).fillna("")
-review_mask = (
-    df["requires_human_review"]
-    .astype(str)
-    .str.strip()
-    .str.lower()
-    .isin(["true", "1", "yes", "y"])
-)
-
-review = df[review_mask].copy()
+mask = df["requires_human_review"].astype(str).str.strip().str.lower().isin(["true", "1", "yes", "y"])
+review = df[mask].copy()
 review["human_review_completed"] = ""
 review["human_review_notes"] = ""
 review.to_csv(target, index=False)
-
 print("Human-review rows:", len(review))
-print("Created:", target)
 PY
 ```
 
-Create screenshot links:
+Open:
 
 ```bash
-python - <<'PY'
-from pathlib import Path
-import pandas as pd
-
-queue = pd.read_csv("data/annotations/human_review_queue.csv").fillna("")
-output = Path("data/annotations/human_review_images")
-output.mkdir(parents=True, exist_ok=True)
-
-created = 0
-for position, row in queue.iterrows():
-    source = Path(str(row["image_path"])).expanduser()
-    if not source.exists():
-        print("Missing:", source)
-        continue
-
-    target = output / f"{position + 1:04d}_{row['sample_id']}_{source.name}"
-    if target.exists() or target.is_symlink():
-        target.unlink()
-    target.symlink_to(source.resolve())
-    created += 1
-
-print("Created links:", created)
-PY
+open data/annotations/local/human_review_queue.csv
 ```
 
-Open review files:
-
-```bash
-open data/annotations/human_review_queue.csv
-open data/annotations/human_review_images
-```
-
-For each row, verify or correct:
-
-```text
-final_credential_theft
-final_financial_fraud
-final_malware_distribution
-final_personal_information_harvesting
-```
-
-Then set:
+Verify or correct all four `final_*` labels, then set:
 
 ```text
 human_review_completed = 1
-human_review_notes = concise evidence-based reason
+human_review_notes = concise screenshot-visible justification
 ```
 
-Use only `0` or `1`. Do not infer hidden fields or a later webpage.
-
----
-
-# 12. Finalise human-approved ground truth
-
-Verify review completeness:
+## 25. Verify completion
 
 ```bash
 python - <<'PY'
 import pandas as pd
 
-df = pd.read_csv("data/annotations/human_review_queue.csv").fillna("")
-completed = (
-    df["human_review_completed"]
-    .astype(str)
-    .str.strip()
-    .str.lower()
-    .isin(["1", "true", "yes", "y"])
-)
-
+df = pd.read_csv("data/annotations/local/human_review_queue.csv").fillna("")
+completed = df["human_review_completed"].astype(str).str.strip().str.lower().isin(["1", "true", "yes", "y"])
 print("Total:", len(df))
 print("Completed:", int(completed.sum()))
 print("Incomplete:", int((~completed).sum()))
 PY
 ```
 
-Continue only when `Incomplete` is zero:
+## 26. Finalise and apply labels
 
 ```bash
-python -m py_compile scripts/finalise_annotations.py
-python scripts/finalise_annotations.py
-```
+python scripts/finalise_annotations.py \
+  --agreement data/annotations/local/final_agreement.csv \
+  --review data/annotations/local/human_review_queue.csv \
+  --output data/annotations/local/final_adjudicated.csv
 
-Output:
-
-```text
-data/annotations/final_adjudicated.csv
-```
-
-Apply to the manifest:
-
-```bash
 cp data/processed/manifest.csv \
-   data/processed/manifest_before_adjudication.csv
+  data/processed/manifest_before_local_adjudication.csv
 
 python scripts/apply_adjudicated_labels.py \
   --manifest data/processed/manifest.csv \
-  --adjudicated data/annotations/final_adjudicated.csv
+  --adjudicated data/annotations/local/final_adjudicated.csv
 ```
 
 ---
 
-# 13. Evaluation
+# Evaluation
 
-The custom `evaluate.py` supports:
-
-```text
---manifest
---mode
---limit
-```
-
-It does not accept `--provider` or `--force`.
-
-Check:
+## 27. Evaluator interface
 
 ```bash
 python scripts/evaluate.py --help
 ```
 
-Run a one-record check:
+The current evaluator supports `--manifest`, `--mode`, and `--limit`. Do not pass unsupported `--provider` or `--force` arguments.
+
+## 28. Run evaluation
 
 ```bash
-python scripts/evaluate.py \
-  --manifest data/processed/manifest.csv \
-  --mode gated \
-  --limit 1
+python scripts/evaluate.py --manifest data/processed/manifest.csv --mode gated --limit 1
+python scripts/evaluate.py --manifest data/processed/manifest.csv --mode gated --limit 5
+python scripts/evaluate.py --manifest data/processed/manifest.csv --mode single
+python scripts/evaluate.py --manifest data/processed/manifest.csv --mode always
+python scripts/evaluate.py --manifest data/processed/manifest.csv --mode gated
 ```
 
-Run a five-record check:
+The evaluator should use only phishing rows with final adjudicated intention labels. Legitimate rows are outside the four-intention task unless a separate phishing-detection experiment is implemented.
 
-```bash
-python scripts/evaluate.py \
-  --manifest data/processed/manifest.csv \
-  --mode gated \
-  --limit 5
-```
-
-Run full experiments:
-
-```bash
-python scripts/evaluate.py \
-  --manifest data/processed/manifest.csv \
-  --mode single
-
-python scripts/evaluate.py \
-  --manifest data/processed/manifest.csv \
-  --mode always
-
-python scripts/evaluate.py \
-  --manifest data/processed/manifest.csv \
-  --mode gated
-```
-
-Before a fresh run, archive stale outputs because the evaluator has no `--force` option:
-
-```bash
-mkdir -p outputs/archive_before_final_evaluation
-
-find outputs \
-  -type f \
-  \( -name "predictions_*.jsonl" \
-  -o -name "metrics_*.json" \
-  -o -name "summary_*.csv" \
-  -o -name "per_label_*.csv" \) \
-  -exec mv {} outputs/archive_before_final_evaluation/ \;
-```
-
-Metrics include:
-
-- micro precision
-- micro recall
-- micro F1
-- per-intention precision, recall and F1
-- subset accuracy
-- Accuracy by Complexity
-
-A `null` complexity score means that the evaluated subset contains no record with that number of positive labels.
+Report micro precision, micro recall, micro F1, per-intention precision/recall/F1/support, exact subset accuracy, and Accuracy by Complexity.
 
 ---
 
-# 14. Troubleshooting
+# Troubleshooting
 
-## `unknown model architecture: 'mllama'`
+## Missing dataset folders
 
-Do not use `llama3.2-vision:11b` with the affected installed Ollama runner. Use:
+The dataset must contain all six folders under `image/{train,val,test}/{legitimate,phishing}`.
 
-```bash
-ollama pull gemma3:12b
-```
+## Missing image paths
 
-Set:
+Regenerate `manifest.csv` after moving the external dataset.
 
-```dotenv
-OLLAMA_ADJUDICATION_MODEL=gemma3:12b
-```
+## Pilot produces no new rows
+
+Ensure completed IDs are excluded before applying `--limit`.
+
+## Tall screenshots become unreadable
+
+Preserve aspect ratio with separate width and height limits. Do not force a square thumbnail.
+
+## Mistral changes agreed labels
+
+Preserve primary agreement and use Mistral only for disputed labels.
 
 ## Ollama HTTP 500
-
-Inspect macOS logs:
 
 ```bash
 tail -n 150 ~/.ollama/logs/server.log
 
-grep -Ei \
-  "error|failed|panic|memory|alloc|runner|500|vision" \
-  ~/.ollama/logs/server.log \
-  | tail -n 100
+grep -Ei "error|failed|panic|memory|alloc|runner|500|vision" \
+  ~/.ollama/logs/server.log | tail -n 100
 ```
 
-Test text-only and then vision directly before running a batch.
+## `.gitignore` appears ineffective
 
-## `ModuleNotFoundError: phishintention`
-
-```bash
-python -m pip install -e .
-```
-
-## HTML accidentally embedded in a CSV
-
-Back up and clean the CSV before completing human review. Do not treat HTML tags as annotation values.
-
-## All-zero evaluation metrics
-
-Inspect the selected ground-truth row. A zero-positive ground-truth vector can produce `null` complexity groups and zero overlap metrics.
+The file may already be tracked. Remove generated files from the Git index with `git rm --cached`, then re-add `.gitkeep` placeholders.
 
 ---
 
-# 15. Final reproducibility checklist
+# Reproducibility checklist
 
-- [ ] `.venv` active
-- [ ] Dependencies installed
-- [ ] Project installed in editable mode
-- [ ] Ollama running
-- [ ] `gemma3:12b` installed
-- [ ] Main Qwen model installed
-- [ ] Manifest generated and image paths valid
-- [ ] Expanded KB validated
-- [ ] OpenAI annotations complete
-- [ ] Gemini annotations complete
-- [ ] Agreement metrics generated
-- [ ] Failed rows retried with local Gemma
-- [ ] Historical Groq provenance archived
-- [ ] Human-review queue completed
-- [ ] `final_adjudicated.csv` created
-- [ ] Final labels applied to `manifest.csv`
-- [ ] Stale evaluation outputs archived
-- [ ] Single, always and gated runs completed
-- [ ] Annotation and evaluation artefacts frozen
+- [ ] Python 3.11 and `.venv` configured
+- [ ] dependencies installed and tests pass
+- [ ] `.env` configured
+- [ ] Ollama and all four models available
+- [ ] new dataset has all six class folders
+- [ ] migration dry run succeeds
+- [ ] old dataset artefacts archived
+- [ ] new manifest generated and validated
+- [ ] `.gitignore` updated and generated files untracked
+- [ ] KB validated
+- [ ] Streamlit starts
+- [ ] Gemma and MiniCPM pilots succeed
+- [ ] equal coverage confirmed
+- [ ] provider-neutral agreement generated
+- [ ] Mistral pilot and full run complete
+- [ ] every tie-breaker row human-reviewed
+- [ ] final adjudicated labels applied to manifest
+- [ ] single, always, and gated evaluations complete
 
 ## Recommended methodology wording
 
-> GPT-4.1 Mini and Gemini 3.8 Flash produced independent primary screenshot annotations. Disagreement or unresolved records were provisionally reviewed using Gemma 3 12B through local Ollama. Every local tie-breaker output remained flagged for human verification. Only final human-approved labels were applied to the manifest and used as ground truth for evaluating the Qwen2.5-VL multi-agent RAG architecture. Historical Groq outputs were retained only for provenance and were not treated as human adjudication.
+> The project used one screenshot dataset organised into train, validation and test splits with legitimate and phishing class folders. Only known phishing screenshots entered the four-intention annotation workflow. Gemma 3 12B and MiniCPM-V 8B independently annotated each phishing screenshot using the same label definitions and structured schema. Labels on which both primary annotators agreed were preserved. Mistral Small 3.1 24B produced provisional decisions only for disputed labels. Every Mistral-resolved row received human verification. Only final human-approved labels were applied to the manifest and used as ground truth for evaluating the Qwen2.5-VL multi-agent RAG architecture.

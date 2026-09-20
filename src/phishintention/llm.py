@@ -4,6 +4,7 @@ import re
 from io import BytesIO
 from pathlib import Path
 from typing import Any
+from urllib import response
 
 import requests
 from PIL import Image
@@ -202,7 +203,28 @@ class OllamaClient:
             timeout=600,
         )
 
-        response.raise_for_status()
+        url = f"{self.base_url.rstrip('/')}/api/generate"
+
+        # print("OLLAMA URL:", url)
+        # print("OLLAMA MODEL:", self.model)
+        # print("IMAGE PATH:", image_path)
+
+        response = requests.post(
+            url,
+            json=payload,
+            timeout=600,
+        )
+
+        if not response.ok:
+            raise RuntimeError(
+                "\nOllama request failed:\n"
+                f"URL: {response.url}\n"
+                f"Status: {response.status_code}\n"
+                f"Model: {self.model}\n"
+                f"Image: {image_path}\n"
+                f"Response: {response.text}\n"
+            )
+
 
         response_body = response.json()
 
