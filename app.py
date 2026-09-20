@@ -6,7 +6,6 @@ import pandas as pd
 import streamlit as st
 from PIL import Image
 
-
 PROJECT_ROOT = Path(__file__).resolve().parent
 SOURCE_ROOT = PROJECT_ROOT / "src"
 
@@ -15,7 +14,6 @@ if str(SOURCE_ROOT) not in sys.path:
         0,
         str(SOURCE_ROOT),
     )
-
 
 from phishintention.config import Settings
 from phishintention.formatter import (
