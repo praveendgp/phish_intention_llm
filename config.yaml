@@ -1,0 +1,236 @@
+# =====================================================================
+# PhishIntentionLLM - Central Configuration
+# Multi-Agent Retrieval-Augmented Generation for Phishing Intention Analysis
+# Re-implementation of Li et al. (ICDF2C 2025) with open-source Ollama VLMs
+# =====================================================================
+
+project:
+  name: PhishIntentionLLM
+  tagline: "Uncovering Phishing Website Intentions through Multi-Agent RAG"
+  version: "2.0.0"
+
+# ---------------------------------------------------------------------
+# Ollama runtime
+# ---------------------------------------------------------------------
+ollama:
+  host: "http://localhost:11434"
+  request_timeout: 300
+  keep_alive: "10m"
+  num_ctx: 8192
+  max_retries: 3
+  retry_backoff: 2.0
+
+  # anti-loop decoding
+  num_predict: 1024
+  repeat_penalty: 1.15
+  repeat_last_n: 256
+
+  # these models loop under Ollama's JSON grammar
+  disable_json_format_for: ["minicpm-v", "moondream"]
+
+# ---------------------------------------------------------------------
+# MODELS
+#
+# TWO SEPARATE STAGES, TWO SEPARATE MODEL GROUPS
+#
+#   A) MANIFEST STAGE  (annotation/)
+#      annotator_a + annotator_b  -> independent labels
+#      manifest_tiebreaker        -> rules on disputes
+#      manifest_finalizer         -> writes the manifest record
+#      The manifest is the REFERENCE used to score the framework later.
+#
+#   B) FRAMEWORK STAGE (pipeline/)
+#      vision / context / classifier / specialist / validator
+#      These are the five layers of the paper. They NEVER see the manifest.
+#
+# EVERY model below must be a vision-language model: all agents that reason
+# about a screenshot are given the image itself (vision: true is enforced).
+#
+# CONSTRAINTS:
+#   * No model evaluated in the base paper is used as an annotator
+#     (GPT-4o, GPT-4o-mini, Gemini-2.0-Flash, Qwen2.5-VL-72B).
+#   * No LLaMA-family model anywhere.
+# ---------------------------------------------------------------------
+models:
+
+  # ---------- A) MANIFEST STAGE ----------
+  annotator_a:
+    model: "minicpm-v:8b"
+    vision: true
+    temperature: 0.1
+    top_p: 0.9
+    label: "Annotator-A (MiniCPM-V)"
+
+  annotator_b:
+    model: "granite3.2-vision:2b"
+    vision: true
+    temperature: 0.1
+    top_p: 0.9
+    label: "Annotator-B (Granite-Vision)"
+    num_ctx: 12288
+
+  manifest_tiebreaker:
+    model: "mistral-small3.2:24b"
+    vision: true
+    temperature: 0.0
+    top_p: 0.9
+    label: "Manifest Tie-Breaker (Mistral-Small-3.2)"
+
+  manifest_finalizer:
+    model: "gemma3:12b"
+    vision: true
+    temperature: 0.0
+    top_p: 0.9
+    label: "Manifest Finaliser (Gemma-3)"
+
+  # ---------- B) FRAMEWORK STAGE (the five paper layers) ----------
+  vision:
+    model: "minicpm-v:8b"
+    vision: true
+    temperature: 0.1
+    json_format: false      # skip the grammar for this role only
+    num_predict: 768
+
+  context:
+    model: "gemma3:12b"
+    vision: true
+    temperature: 0.0
+    top_p: 0.9
+    label: "Context Layer (Gemma-3)"
+
+  classifier:
+    model: "gemma3:12b"
+    vision: true
+    temperature: 0.0
+    top_p: 0.9
+    label: "Classification Layer (Gemma-3)"
+
+  specialist:
+    model: "gemma3:12b"
+    vision: true
+    temperature: 0.0
+    top_p: 0.9
+    label: "Specialist Layer (Gemma-3)"
+
+  validator:
+    model: "mistral-small3.2:24b"
+    vision: true
+    temperature: 0.0
+    top_p: 0.9
+    label: "Validation Layer (Mistral-Small-3.2)"
+
+# ---------------------------------------------------------------------
+# Framework behaviour (Algorithm, Fig. 3 of the paper)
+# ---------------------------------------------------------------------
+framework:
+  confidence_threshold: 0.60     # tau
+  top_k_categories: 3            # Top-k(S, k=3)
+  min_categories: 1
+  enable_feedback_loop: true
+  enable_rag: true
+  retrieval_top_k: 4
+  max_image_edge: 896           # screenshots down-scaled before encoding
+  # Every agent that reasons about the screenshot receives the image.
+  # Set to false only for debugging a text-only ablation.
+  vision_for_all_agents: true
+
+# ---------------------------------------------------------------------
+# Manifest stage
+# ---------------------------------------------------------------------
+manifest:
+  agreement_margin: 0.15         # solo claim escalates if confidence < 1 - margin
+  enable_tiebreaker: true
+  enable_finalizer: true
+  min_confidence: 0.35           # labels below this are dropped from the manifest
+  max_intentions: 3
+  # Manifest records flagged for human review before being trusted as reference.
+  flag_for_review_when: ["conflict", "tie-break applied", "low confidence"]
+
+# ---------------------------------------------------------------------
+# Intention taxonomy
+# ---------------------------------------------------------------------
+categories:
+  - "Credential Theft"
+  - "Financial Fraud"
+  - "Malware Distribution"
+  - "Personal Information Harvesting"
+
+sectors:
+  - financial
+  - e-commerce
+  - social networking
+  - telecommunications
+  - email provider
+  - online/cloud service
+  - delivery & couriers
+  - government
+  - gaming
+  - insurance
+  - internet service
+  - payment services
+  - cryptocurrency
+  - transportation
+  - other
+
+# ---------------------------------------------------------------------
+# Datasets - two sources, two different on-disk structures
+# ---------------------------------------------------------------------
+datasets:
+  root: "./data/raw"
+
+  putra:
+    enabled: true
+    path: "./data/raw/putra"
+    # putra/<label>/<record-id>/screenshots/*.png  +  /assets/*
+    labels: ["phishing", "not-phishing"]
+    screenshot_dir: "screenshots"
+    asset_dir: "assets"
+    phishing_only: true
+
+  phishiris:
+    enabled: true
+    path: "./data/raw/phishIris"
+    # phishIris/<split>/<brand>/*.png   (all phishing)
+    splits: ["train", "val"]
+    brand_is_directory: true
+
+# ---------------------------------------------------------------------
+# Storage
+# ---------------------------------------------------------------------
+storage:
+  results_dir: "./data/outputs/results"
+  manifest: "./data/outputs/manifest.jsonl"          # <- annotator output
+  manifest_runs_dir: "./data/outputs/manifest_runs"
+  predictions: "./data/outputs/predictions.jsonl"    # <- framework output
+  manual_annotations: "./data/outputs/manual_annotations.jsonl"
+  ground_truth: "./data/outputs/ground_truth.jsonl"  # <- human-reviewed
+  runs_dir: "./data/outputs/runs"
+  kb_dir: "./data/knowledge_base"
+
+# ---------------------------------------------------------------------
+# Manual annotation module (kept as-is from the original project)
+# ---------------------------------------------------------------------
+manual_annotation:
+  enabled: true
+  annotators: ["engineer_1", "engineer_2", "reviewer"]
+  require_reviewer: true
+  allow_multi_intention: true
+  max_intentions_per_sample: 4
+
+# ---------------------------------------------------------------------
+# Evaluation
+# ---------------------------------------------------------------------
+evaluation:
+  # Which label set the framework is scored against.
+  #   manifest      -> the annotator-generated manifest (default)
+  #   ground_truth  -> the human-reviewed labels
+  reference: "manifest"
+  complexity_thresholds: {1: 1, 2: 1, 3: 2}
+  train_test_split: 0.9
+  random_seed: 42
+
+ui:
+  theme: "dark"
+  page_title: "PhishIntentionLLM"
+  show_agent_trace: true
+  show_raw_json: true

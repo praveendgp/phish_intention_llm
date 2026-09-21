@@ -1,81 +1,15 @@
-# -----------------------------------------------------------------------------
-# Python
-# -----------------------------------------------------------------------------
 __pycache__/
 *.py[cod]
-*$py.class
-.pytest_cache/
-.mypy_cache/
-.ruff_cache/
-.coverage
-.coverage.*
-htmlcov/
-
-# -----------------------------------------------------------------------------
-# Virtual environments and secrets
-# -----------------------------------------------------------------------------
 .venv/
 venv/
-env/
 .env
-.env.*
-!.env.example
-
-# -----------------------------------------------------------------------------
-# Editors and operating-system files
-# -----------------------------------------------------------------------------
 .DS_Store
-.idea/
-.vscode/
-*.swp
-*.swo
+.streamlit/secrets.toml
 
-# -----------------------------------------------------------------------------
-# Build and package artefacts
-# -----------------------------------------------------------------------------
-build/
-dist/
-*.egg-info/
-
-# -----------------------------------------------------------------------------
-# Raw or externally mounted datasets
-# -----------------------------------------------------------------------------
+# Datasets are large - keep them out of version control
 data/raw/*
-!data/raw/.gitkeep
+!data/raw/README.md
 
-# The migration may create this symbolic link to the external dataset.
-data/raw/phishing_dataset
-
-# -----------------------------------------------------------------------------
-# Generated dataset indexes and local migration state
-# -----------------------------------------------------------------------------
-data/processed/*
-!data/processed/.gitkeep
-migration_backups/
-migration_report.json
-
-# -----------------------------------------------------------------------------
-# Generated annotation and adjudication artefacts
-# -----------------------------------------------------------------------------
-data/annotations/*
-!data/annotations/.gitkeep
-
-# -----------------------------------------------------------------------------
-# Model predictions, reports, debug files, uploads and evaluation outputs
-# -----------------------------------------------------------------------------
-outputs/*
-!outputs/.gitkeep
-
-# -----------------------------------------------------------------------------
-# Local experiment snapshots and archived runtime artefacts
-# -----------------------------------------------------------------------------
-experiments/
-archive/
-
-# -----------------------------------------------------------------------------
-# Ollama and model files, if stored inside the repository
-# -----------------------------------------------------------------------------
-.ollama/
-models/
-*.gguf
-*.safetensors
+# Generated artefacts
+data/outputs/
+*.jsonl

@@ -1,9 +1,21 @@
-pydantic>=2.7,<3
-python-dotenv>=1.0
-requests>=2.32
-Pillow>=10.3
-pandas>=2.2
-scikit-learn>=1.5
-streamlit>=1.36
-pytesseract>=0.3.13
-pytest>=8.2
+# ---------------------------------------------------------------------------
+# PhishIntentionLLM - dependencies
+#
+# The project talks to a local Ollama server over plain HTTP, so no vendor SDK
+# is required. Everything below is open source.
+# ---------------------------------------------------------------------------
+
+# Core
+PyYAML>=6.0
+Pillow>=10.0.0
+
+# User interface
+streamlit>=1.36.0
+pandas>=2.0.0
+altair>=5.0.0
+
+# Optional: dense retrieval for the RAG layer.
+# The retriever falls back to a built-in TF-IDF index when these are absent,
+# so the project runs fine without them.
+# sentence-transformers>=3.0.0
+# numpy>=1.26.0

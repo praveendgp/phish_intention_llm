@@ -1,0 +1,156 @@
+{
+  "name": "Specialist Knowledge Repository (K_C)",
+  "description": "Category-specific knowledge K_c = {F_c, D_c} with D_c = {T_c, M_c, I_c} (common targets, specialised techniques, distinctive indicators) per Definition 1.",
+  "categories": {
+    "Credential Theft": {
+      "definition": "Counterfeit interfaces that impersonate legitimate platforms in order to capture user authentication credentials for account takeover.",
+      "primary_features": [
+        "Password field, or an email-first login flow that leads to one.",
+        "Brand-locked sign-in card that accepts credentials for a single impersonated provider.",
+        "Multi-provider webmail chooser routing every brand to the same form.",
+        "'Stay signed in', 'Forgot password' and 'Create account' affordances copied from the target.",
+        "Second-factor prompt: OTP, authenticator code, SMS PIN, security question."
+      ],
+      "common_targets": [
+        "Email providers: Outlook, Office365, Gmail, Yahoo, Zimbra, RoundCube, cPanel webmail.",
+        "Banking and net-banking portals, and their corporate cash-management logins.",
+        "Social platforms: Facebook, Instagram, LinkedIn, X, WeChat.",
+        "Enterprise SSO: Microsoft 365, Okta, Google Workspace, VPN and Citrix gateways.",
+        "Cloud storage: OneDrive, SharePoint, Dropbox, Google Drive, Adobe Document Cloud.",
+        "Telecom and ISP self-care portals; gaming launchers; crypto exchanges."
+      ],
+      "techniques": [
+        "Credential harvesting form posting to an attacker-controlled PHP handler or Telegram bot.",
+        "Two-stage flow: password first, then OTP, to defeat SMS-based MFA in real time.",
+        "Pre-filled victim email address passed through the URL to increase credibility.",
+        "Document-lure gating: a blurred invoice or shared file behind a sign-in wall.",
+        "Fake error 'incorrect password' on first submit to capture the credential twice.",
+        "Obfuscated or base64-encoded page source and cloaking against security crawlers."
+      ],
+      "indicators": [
+        "Any visible password input is the single strongest indicator of this category.",
+        "'Sign in', 'Log in', 'Continue', 'Verify your account' as the primary call to action.",
+        "Account-security framing: 'unusual activity', 'session expired', 'confirm it is you'.",
+        "Provider logo above a minimal two-field form with no other site functionality.",
+        "Domain in the screenshot unrelated to the brand whose login is displayed."
+      ],
+      "counter_indicators": [
+        "A real password manager or browser-native dialog rather than an in-page form.",
+        "A registration form that collects profile data but no authentication secret."
+      ]
+    },
+
+    "Financial Fraud": {
+      "definition": "Pages engineered for direct monetary exploitation - payment-instrument capture or solicitation of a transfer.",
+      "primary_features": [
+        "Card number, expiry, CVV/CVC or cardholder-name fields.",
+        "Explicit amount due, fee, fine, customs charge or subscription price.",
+        "Payment-network branding: Visa, Mastercard, JCB, 3-D Secure, Verified by Visa, J/Secure.",
+        "Bank transfer instructions, UPI/IBAN details or crypto wallet address and QR code.",
+        "Investment return promises, refund forms, or 'claim your prize' payout flows."
+      ],
+      "common_targets": [
+        "Banking and card customers; online shoppers at checkout.",
+        "Parcel recipients charged a small 'redelivery' or customs fee.",
+        "Utility, tax and traffic-fine payers.",
+        "Crypto investors and wallet holders; subscription renewals and streaming services."
+      ],
+      "techniques": [
+        "Small-amount lure (a 1-3 unit fee) to make card entry feel low-risk.",
+        "Fake 3-D Secure interstitial that harvests the one-time payment code.",
+        "Advance-fee framing: pay a processing charge to release a larger sum.",
+        "Technical-support scam demanding payment for a fabricated infection.",
+        "Wallet-drain approval disguised as an airdrop claim or token migration.",
+        "Countdown timers on the payment screen to prevent verification."
+      ],
+      "indicators": [
+        "CVV or expiry-date field present - a legitimate login never requires these.",
+        "Currency symbols and an itemised amount adjacent to a submission button.",
+        "'Pay now', 'Confirm payment', 'Release funds', 'Claim refund' calls to action.",
+        "Card-art imagery or payment-network logo strip beneath the form.",
+        "Unrealistic yield, guaranteed-profit or lottery-win messaging."
+      ],
+      "counter_indicators": [
+        "A product catalogue with no payment capture on the visible page.",
+        "Donation or pricing information that is purely descriptive."
+      ]
+    },
+
+    "Malware Distribution": {
+      "definition": "Deceptive interfaces that induce the visitor to execute or install a malicious payload.",
+      "primary_features": [
+        "Prominent download button or auto-started download notification.",
+        "Software-update, codec, media-player or PDF-reader impersonation.",
+        "Simulated antivirus scan reporting infections and offering a 'cleaner' tool.",
+        "Instructions to disable protection, allow notifications, or run a command.",
+        "Browser-extension or mobile APK install prompt from a non-official store."
+      ],
+      "common_targets": [
+        "Users seeking free software, cracks, media files or document viewers.",
+        "Visitors alarmed by fake system or browser security warnings.",
+        "Corporate users receiving 'required update' notices for common tooling."
+      ],
+      "techniques": [
+        "Fake CAPTCHA that instructs the user to paste a command into a run dialog.",
+        "Drive-by download chained to a redirect from an ad or shortened link.",
+        "Archive password given on the page so the payload evades scanning.",
+        "Extension bait: 'install this plugin to view the document'.",
+        "Repeated overlay pop-ups that make the download the only escape path."
+      ],
+      "indicators": [
+        "'Download', 'Install', 'Update now', 'Start download', 'Get the app' buttons.",
+        "File names, sizes or extensions (.exe, .apk, .dmg, .zip, .scr) shown on screen.",
+        "Red or yellow alarm imagery with scan progress and threat counts.",
+        "Version badges or 'your player is out of date' messaging.",
+        "Instruction steps numbered 1-2-3 that end in running a file."
+      ],
+      "counter_indicators": [
+        "A legitimate product page where the download is the site's genuine purpose.",
+        "A document preview with no executable delivery path."
+      ]
+    },
+
+    "Personal Information Harvesting": {
+      "definition": "Collection of personally identifiable information well beyond authentication secrets, enabling identity theft or resale.",
+      "primary_features": [
+        "Full name, date of birth, residential address, postcode fields.",
+        "National identifiers: SSN, Aadhaar, NRIC, passport, driving licence, tax ID.",
+        "Phone number, alternate email, mother's maiden name or other recovery data.",
+        "Employment, income, health, insurance or education details.",
+        "Document or selfie upload controls for 'identity verification' / KYC."
+      ],
+      "common_targets": [
+        "Benefit, tax-refund, subsidy and grant claimants.",
+        "Delivery recipients asked to 'confirm' their address details.",
+        "Survey, prize-draw and job-application respondents.",
+        "Healthcare, insurance and telecom customers completing 'verification'."
+      ],
+      "techniques": [
+        "Progressive profiling across multiple steps so no single page looks excessive.",
+        "Survey or quiz framing with a reward at the end.",
+        "KYC or age-verification pretext requiring an ID photo.",
+        "Address-confirmation step appended after a credential capture page.",
+        "Optional-looking fields that are in fact mandatory to proceed."
+      ],
+      "indicators": [
+        "Three or more distinct PII fields visible on one form.",
+        "Asterisk-marked mandatory fields for identity data on a consumer page.",
+        "Labels such as 'Delivery address', 'ID number', 'Date of birth', 'Occupation'.",
+        "Upload controls beside identity-document wording.",
+        "Data requested is disproportionate to the stated purpose of the page."
+      ],
+      "counter_indicators": [
+        "A login page that only asks for an email address as the account identifier.",
+        "A checkout shipping form on a genuine merchant site."
+      ]
+    }
+  },
+
+  "co_occurrence_notes": [
+    "Credential Theft + Personal Information Harvesting is the dominant pair: the page takes the password and then 'verifies' identity with address and phone.",
+    "Credential Theft + Financial Fraud appears when a banking login is immediately followed by card or transfer capture.",
+    "Financial Fraud + Personal Information Harvesting occurs on refund, fine and customs-fee pages that need both card and identity data.",
+    "Malware Distribution rarely co-occurs; when it does it is usually with Credential Theft on fake software-portal logins.",
+    "Assign multiple labels only when distinct evidence supports each one - not because a category is plausible."
+  ]
+}

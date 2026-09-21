@@ -1,0 +1,62 @@
+{
+  "name": "Basic Threat Pattern Repository (K_B)",
+  "description": "Domain-agnostic phishing indicators used by the Context Enrichment Agent. Formalised in Definition 1 as K_B = {P_c, P_v, P_t}.",
+  "common_patterns": [
+    "Brand logo rendered at high fidelity while the surrounding layout is low fidelity or misaligned.",
+    "A single isolated login card on an otherwise empty page with no working site navigation.",
+    "Page content mismatched with the hosting domain, or the domain is hidden entirely from the screenshot.",
+    "Session-expiry, account-suspension or verification-required framing that demands immediate action.",
+    "Multi-brand webmail selector offering Gmail / Yahoo / Outlook / AOL / Office365 tiles on one page.",
+    "Generic 'Sign in with your email provider' pages that accept any email domain.",
+    "Legal footer, privacy policy and support links present as text but not actually clickable.",
+    "Copyright year that is stale or inconsistent with the impersonated brand's live site.",
+    "Form submission to an unrelated third-party handler, pastebin or IP-literal endpoint.",
+    "CAPTCHA or Cloudflare-style interstitial used as a cloak before the phishing content.",
+    "Machine-translated or grammatically inconsistent copy inside an otherwise polished template.",
+    "Documents or invoices blurred behind an overlay that requires a login to 'unlock'."
+  ],
+  "visual_deception": [
+    "Pixel-level clone of a legitimate brand template, often scraped directly from the real site.",
+    "Padlock icons, 'Secure Connection' badges or fake SSL seals drawn into the page body.",
+    "Trust badges: Norton Secured, McAfee, VeriSign, BBB, TRUSTe placed near a form.",
+    "Fake browser chrome or address bar drawn inside the page to spoof a trusted URL.",
+    "Modal overlay dimming a screenshot of the real website behind the credential prompt.",
+    "Countdown timers, progress bars or 'remaining attempts' counters manufacturing urgency.",
+    "Mobile-app-styled interface used to hide the absence of a real URL bar.",
+    "Low-resolution or stretched logo indicating an image lifted from a search result.",
+    "Colour scheme and typography copied from the target brand but with wrong spacing or kerning.",
+    "Full-screen alert imagery: warning triangles, red banners, sirens, simulated virus scans."
+  ],
+  "text_manipulation": [
+    "Urgency: 'act now', 'within 24 hours', 'final notice', 'your account will be closed'.",
+    "Fear: 'unusual sign-in detected', 'your device is infected', 'unauthorised transaction'.",
+    "Authority: impersonation of IT support, tax authority, police, bank fraud desk, HR.",
+    "Reward: prize, refund, cashback, gift card, airdrop or lottery framing.",
+    "Scarcity: 'limited slots', 'offer expires today', 'only 3 items left'.",
+    "Confidentiality: 'do not share this message', 'verify privately' to discourage checking.",
+    "Instructional pressure: 'do not close this window', 'keep the page open until complete'.",
+    "Requests for information a legitimate site would never ask for on one screen (password plus OTP plus card plus ID)."
+  ],
+  "url_red_flags": [
+    "Typosquatting or homoglyph domains: rn for m, 1 for l, Cyrillic lookalikes.",
+    "Brand name placed in a subdomain or path rather than the registrable domain.",
+    "Free hosting, site builders, or link shorteners standing in for a corporate domain.",
+    "Punycode (xn--) domains and long random hyphenated strings.",
+    "Raw IP address in the address bar, or non-standard port numbers.",
+    "Deeply nested paths that embed the victim's email address as a parameter."
+  ],
+  "sector_cues": {
+    "financial": ["bank logo", "account balance", "IBAN / routing / sort code", "card art", "net-banking login", "secure code"],
+    "e-commerce": ["cart", "checkout", "order tracking", "product grid", "marketplace seller badge"],
+    "social networking": ["profile photo", "feed", "friend request", "follow button", "timeline"],
+    "telecommunications": ["mobile plan", "top-up", "data pack", "carrier logo", "SIM"],
+    "email provider": ["webmail login", "inbox preview", "mail provider tiles", "mailbox quota"],
+    "online/cloud service": ["file sharing", "document preview", "storage quota", "SSO consent screen"],
+    "delivery & couriers": ["tracking number", "parcel status", "customs fee", "redelivery scheduling"],
+    "government": ["tax portal", "national ID", "benefits claim", "e-filing", "official seal"],
+    "gaming": ["game skins", "in-game currency", "launcher login", "free items"],
+    "cryptocurrency": ["wallet connect", "seed phrase", "token airdrop", "exchange login"],
+    "payment services": ["send money", "wallet balance", "UPI / PayPal / card linking"],
+    "insurance": ["policy number", "claim form", "premium payment"]
+  }
+}
