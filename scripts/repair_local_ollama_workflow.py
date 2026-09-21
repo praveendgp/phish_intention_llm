@@ -1,9 +1,33 @@
+#!/usr/bin/env python3
+"""Repair the local-only Ollama annotation workflow after cloud cleanup.
+
+Repairs:
+1. Rebuilds annotators/__init__.py without dangling parentheses.
+2. Replaces calculate_annotation_agreement.py with a provider-neutral implementation.
+3. Renames OpenAI/Gemini parameter names and prompt wording in ollama_adjudicator.py.
+4. Renames provider-specific variables in consensus.py without changing behaviour.
+5. Removes stale egg-info generated metadata.
+6. Backs up every changed file before applying changes.
+7. Runs compileall and pytest unless --skip-tests is supplied.
+"""
+
 from __future__ import annotations
+
+import argparse
+import ast
+import json
+import re
+import shutil
+import subprocess
+import sys
+from datetime import datetime
+from pathlib import Path
+
+AGREEMENT_SCRIPT = r'''from __future__ import annotations
 
 import argparse
 import json
 import os
-import re
 from collections import defaultdict
 from pathlib import Path
 from typing import Any
@@ -264,6 +288,189 @@ def main() -> None:
     print(f"Adjudication required: {len(queue)}")
     if args.create_image_links:
         print(f"Image links created: {links}")
+
+
+if __name__ == "__main__":
+    main()
+'''
+
+
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(
+        description="Repair the provider-neutral local Ollama annotation workflow."
+    )
+    parser.add_argument("--project-root", default=".")
+    parser.add_argument("--dry-run", action="store_true")
+    parser.add_argument("--skip-tests", action="store_true")
+    return parser.parse_args()
+
+
+def class_names(path: Path) -> set[str]:
+    if not path.exists():
+        return set()
+    try:
+        tree = ast.parse(path.read_text(encoding="utf-8"))
+    except SyntaxError:
+        return set()
+    return {node.name for node in ast.walk(tree) if isinstance(node, ast.ClassDef)}
+
+
+def build_init(root: Path) -> str:
+    modules = [
+        ("schemas", root / "src/phishintention/annotators/schemas.py"),
+        ("ollama_annotator", root / "src/phishintention/annotators/ollama_annotator.py"),
+        ("ollama_adjudicator", root / "src/phishintention/annotators/ollama_adjudicator.py"),
+    ]
+    preferred = {
+        "schemas": ["AnnotationOutput", "LabelDecision"],
+        "ollama_annotator": ["OllamaAnnotator", "LocalAnnotationOutput"],
+        "ollama_adjudicator": ["OllamaAdjudicator", "OllamaAdjudicationOutput"],
+    }
+    imports: list[str] = ['"""Local Ollama annotation components."""', ""]
+    exports: list[str] = []
+    for module, path in modules:
+        available = class_names(path)
+        selected = [name for name in preferred[module] if name in available]
+        if not selected:
+            continue
+        imports.append(f"from .{module} import (")
+        imports.extend(f"    {name}," for name in selected)
+        imports.append(")")
+        imports.append("")
+        exports.extend(selected)
+    imports.append("__all__ = [")
+    imports.extend(f'    "{name}",' for name in exports)
+    imports.append("]")
+    imports.append("")
+    return "\n".join(imports)
+
+
+def neutralise_adjudicator(text: str) -> str:
+    replacements = [
+        ("annotations produced by OpenAI and Gemini", "annotations produced by two independent local Ollama models"),
+        ("OpenAI annotation:", "Provider A annotation:"),
+        ("Gemini annotation:", "Provider B annotation:"),
+        ("{openai_annotation}", "{annotation_a}"),
+        ("{gemini_annotation}", "{annotation_b}"),
+        ("openai_annotation", "annotation_a"),
+        ("gemini_annotation", "annotation_b"),
+    ]
+    for old, new in replacements:
+        text = text.replace(old, new)
+    return text
+
+
+def neutralise_consensus(text: str) -> str:
+    replacements = [
+        ("openai_path", "annotation_a_path"),
+        ("gemini_path", "annotation_b_path"),
+        ("openai_annotations", "annotations_a"),
+        ("gemini_annotations", "annotations_b"),
+        ("openai_record", "record_a"),
+        ("gemini_record", "record_b"),
+        ("openai_image_path", "image_path_a"),
+        ("gemini_image_path", "image_path_b"),
+        ("openai_quality", "quality_a"),
+        ("gemini_quality", "quality_b"),
+        ("OpenAI and Gemini", "two independent local Ollama providers"),
+        ("OpenAI path", "provider A path"),
+        ("Gemini", "provider B"),
+        ("OpenAI", "provider A"),
+    ]
+    for old, new in replacements:
+        text = text.replace(old, new)
+    return text
+
+
+def run(command: list[str], cwd: Path) -> int:
+    print("\n$", " ".join(command))
+    completed = subprocess.run(command, cwd=cwd, text=True, check=False)
+    return completed.returncode
+
+
+def main() -> None:
+    args = parse_args()
+    root = Path(args.project_root).expanduser().resolve()
+    if not (root / "src/phishintention/annotators").is_dir():
+        raise SystemExit(f"Not a PhishIntentionLLM project root: {root}")
+
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    backup = root / "migration_backups" / f"local_workflow_repair_{timestamp}"
+    init_path = root / "src/phishintention/annotators/__init__.py"
+    agreement_path = root / "scripts/calculate_annotation_agreement.py"
+    adjudicator_path = root / "src/phishintention/annotators/ollama_adjudicator.py"
+    consensus_path = root / "src/phishintention/annotators/consensus.py"
+    targets = [path for path in (init_path, agreement_path, adjudicator_path, consensus_path) if path.exists()]
+
+    print("Planned repairs:")
+    print("- rebuild annotators/__init__.py")
+    print("- replace calculate_annotation_agreement.py with provider-neutral CLI")
+    print("- neutralise provider names in ollama_adjudicator.py")
+    print("- neutralise provider variable names in consensus.py")
+    print("- remove generated *.egg-info directories")
+
+    if args.dry_run:
+        print("\nDry run only. No files changed.")
+        return
+
+    for path in targets:
+        destination = backup / path.relative_to(root)
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(path, destination)
+
+    init_path.write_text(build_init(root), encoding="utf-8")
+    agreement_path.write_text(AGREEMENT_SCRIPT, encoding="utf-8")
+    if adjudicator_path.exists():
+        adjudicator_path.write_text(
+            neutralise_adjudicator(adjudicator_path.read_text(encoding="utf-8")),
+            encoding="utf-8",
+        )
+    if consensus_path.exists():
+        consensus_path.write_text(
+            neutralise_consensus(consensus_path.read_text(encoding="utf-8")),
+            encoding="utf-8",
+        )
+
+    removed_egg_info = []
+    for path in root.glob("**/*.egg-info"):
+        if ".venv" in path.parts:
+            continue
+        removed_egg_info.append(str(path.relative_to(root)))
+        shutil.rmtree(path)
+
+    report = {
+        "backup": str(backup),
+        "changed": [str(path.relative_to(root)) for path in targets],
+        "removed_egg_info": removed_egg_info,
+    }
+    (root / "local_workflow_repair_report.json").write_text(
+        json.dumps(report, indent=2), encoding="utf-8"
+    )
+
+    failures = 0
+    if not args.skip_tests:
+        commands = [
+            [sys.executable, "-m", "py_compile", str(init_path), str(agreement_path)],
+            [sys.executable, "-m", "compileall", "-q", "src", "scripts", "tests"],
+            [sys.executable, "-m", "pytest", "-q"],
+        ]
+        for command in commands:
+            failures += int(run(command, root) != 0)
+
+    print("\nRepair complete.")
+    print("Backup:", backup)
+    print("Report:", root / "local_workflow_repair_report.json")
+    print("\nVerify CLI:")
+    print("python scripts/calculate_annotation_agreement.py --help")
+    print("\nThen run:")
+    print("python scripts/calculate_annotation_agreement.py \\")
+    print("  --annotation-a data/annotations/ollama_gemma_annotations.jsonl \\")
+    print("  --annotation-b data/annotations/ollama_minicpm_annotations.jsonl \\")
+    print("  --provider-a gemma --provider-b minicpm \\")
+    print("  --output-dir data/annotations/local --create-image-links")
+
+    if failures:
+        raise SystemExit(1)
 
 
 if __name__ == "__main__":

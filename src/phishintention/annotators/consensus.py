@@ -365,76 +365,76 @@ def calculate_kappa(
 
 
 def compare(
-    openai_path: str | Path,
-    gemini_path: str | Path,
+    annotation_a_path: str | Path,
+    annotation_b_path: str | Path,
 ) -> tuple[
     pd.DataFrame,
     dict[str, Any],
 ]:
     """
-    Compare independent OpenAI and Gemini annotations.
+    Compare independent two independent local Ollama providers annotations.
 
     The returned DataFrame contains image paths, predictions,
     confidence values, evidence, agreement fields, and an
     adjudication-required flag.
     """
-    openai_annotations = load_jsonl(
-        openai_path
+    annotations_a = load_jsonl(
+        annotation_a_path
     )
 
-    gemini_annotations = load_jsonl(
-        gemini_path
+    annotations_b = load_jsonl(
+        annotation_b_path
     )
 
     shared_sample_ids = sorted(
-        set(openai_annotations)
-        & set(gemini_annotations)
+        set(annotations_a)
+        & set(annotations_b)
     )
 
     comparison_rows = []
 
     for sample_id in shared_sample_ids:
-        openai_record = (
-            openai_annotations[
+        record_a = (
+            annotations_a[
                 sample_id
             ]
         )
 
-        gemini_record = (
-            gemini_annotations[
+        record_b = (
+            annotations_b[
                 sample_id
             ]
         )
 
-        openai_image_path = str(
-            openai_record.get(
+        image_path_a = str(
+            record_a.get(
                 "image_path",
                 "",
             )
         ).strip()
 
-        gemini_image_path = str(
-            gemini_record.get(
+        image_path_b = str(
+            record_b.get(
                 "image_path",
                 "",
             )
         ).strip()
 
-        # Prefer the OpenAI path, falling back to Gemini.
+        # Prefer the provider A path, falling back to provider B.
         image_path = (
-            openai_image_path
-            or gemini_image_path
+            image_path_a
+            or image_path_b
         )
 
-        openai_quality = (
+        quality_a = (
             get_image_quality(
-                openai_record
+                record_a
             )
         )
 
-        gemini_quality = (
+        quality_b = (
             get_image_quality(
-                gemini_record
+                record_b
             )
         )
 
@@ -442,34 +442,34 @@ def compare(
             "sample_id": sample_id,
             "image_path": image_path,
             "source": (
-                openai_record.get(
+                record_a.get(
                     "source"
                 )
-                or gemini_record.get(
+                or record_b.get(
                     "source"
                 )
                 or ""
             ),
             "openai_model": get_model(
-                openai_record
+                record_a
             ),
             "gemini_model": get_model(
-                gemini_record
+                record_b
             ),
-            "openai_quality": (
-                openai_quality
+            "quality_a": (
+                quality_a
             ),
-            "gemini_quality": (
-                gemini_quality
+            "quality_b": (
+                quality_b
             ),
             "openai_notes": (
                 get_annotation_notes(
-                    openai_record
+                    record_a
                 )
             ),
             "gemini_notes": (
                 get_annotation_notes(
-                    gemini_record
+                    record_b
                 )
             ),
         }
@@ -481,14 +481,14 @@ def compare(
         for label in LABELS:
             openai_value = (
                 get_binary_label(
-                    openai_record,
+                    record_a,
                     label,
                 )
             )
 
             gemini_value = (
                 get_binary_label(
-                    gemini_record,
+                    record_b,
                     label,
                 )
             )
@@ -514,7 +514,7 @@ def compare(
                 f"openai_{label}"
                 "_confidence"
             ] = get_confidence(
-                openai_record,
+                record_a,
                 label,
             )
 
@@ -522,7 +522,7 @@ def compare(
                 f"gemini_{label}"
                 "_confidence"
             ] = get_confidence(
-                gemini_record,
+                record_b,
                 label,
             )
 
@@ -530,7 +530,7 @@ def compare(
                 f"openai_{label}"
                 "_evidence"
             ] = get_evidence_text(
-                openai_record,
+                record_a,
                 label,
             )
 
@@ -538,7 +538,7 @@ def compare(
                 f"gemini_{label}"
                 "_evidence"
             ] = get_evidence_text(
-                gemini_record,
+                record_b,
                 label,
             )
 
@@ -550,13 +550,13 @@ def compare(
                 )
 
         quality_agrees = (
-            openai_quality
-            == gemini_quality
+            quality_a
+            == quality_b
         )
 
         both_usable = (
-            openai_quality == "usable"
-            and gemini_quality == "usable"
+            quality_a == "usable"
+            and quality_b == "usable"
         )
 
         row[
@@ -612,21 +612,21 @@ def compare(
 
     metrics: dict[str, Any] = {
         "openai_annotation_count": len(
-            openai_annotations
+            annotations_a
         ),
         "gemini_annotation_count": len(
-            gemini_annotations
+            annotations_b
         ),
         "shared_samples": len(
             comparison_frame
         ),
         "missing_from_openai": sorted(
-            set(gemini_annotations)
-            - set(openai_annotations)
+            set(annotations_b)
+            - set(annotations_a)
         ),
         "missing_from_gemini": sorted(
-            set(openai_annotations)
-            - set(gemini_annotations)
+            set(annotations_a)
+            - set(annotations_b)
         ),
         "exact_labelset_agreement": None,
         "adjudication_required_count": 0,

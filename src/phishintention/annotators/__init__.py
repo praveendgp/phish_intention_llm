@@ -1,31 +1,25 @@
-from .gemini_annotator import (
-    GeminiAnnotator,
-)
-from .openai_annotator import (
-    OpenAIAnnotator,
-)
+"""Local Ollama annotation components."""
+
 from .schemas import (
     AnnotationOutput,
     LabelDecision,
 )
 
-from .ollama_adjudicator import (
-    OllamaAdjudicationOutput,
-    OllamaAdjudicator,
+from .ollama_annotator import (
+    OllamaAnnotator,
+    LocalAnnotationOutput,
 )
 
-from .ollama_annotator import (
-    LocalAnnotationOutput,
-    OllamaAnnotator,
+from .ollama_adjudicator import (
+    OllamaAdjudicator,
+    OllamaAdjudicationOutput,
 )
 
 __all__ = [
     "AnnotationOutput",
     "LabelDecision",
-    "OpenAIAnnotator",
-    "GeminiAnnotator",
-    "OllamaAdjudicator",
-    "OllamaAdjudicationOutput",
     "OllamaAnnotator",
     "LocalAnnotationOutput",
+    "OllamaAdjudicator",
+    "OllamaAdjudicationOutput",
 ]

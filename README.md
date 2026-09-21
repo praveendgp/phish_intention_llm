@@ -11,73 +11,62 @@ The repository uses custom Python orchestration in `src/phishintention/pipeline.
 
 ## Responsible-use boundary
 
-This project analyses static screenshots for defensive research. It does not crawl live phishing websites, execute archived HTML, collect credentials, or generate phishing content. The four-intention pipeline should normally receive screenshots already known to be phishing. A normal login, payment, download, registration, or identity-verification screen is not sufficient by itself to prove malicious intent.
+This project analyzes static screenshots for defensive research. It does not crawl live phishing websites, execute archived HTML, collect credentials, or generate phishing content. The four-intention pipeline receives screenshots already known to be phishing.
 
-## Dataset update: the new dataset is the only active dataset
+## Active dataset: Phish-Blitz screenshots
 
-The project no longer uses the previous Phish-IRIS or Putra datasets. Remove those datasets from the active workspace after the migration backup is created.
+The active annotation dataset is a deduplicated, flattened collection of Phish-Blitz `online.png` screenshots. Every retained image is a known phishing screenshot.
 
-The only active dataset is:
+Recommended repository layout:
 
 ```text
-Phishing dataset/
-├── image/
-│   ├── train/
-│   │   ├── legitimate/
-│   │   └── phishing/
-│   ├── val/
-│   │   ├── legitimate/
-│   │   └── phishing/
-│   └── test/
-│       ├── legitimate/
-│       └── phishing/
-└── url/
+data/raw/phish_blitz/
+├── images/
+│   ├── phish_blitz_000001_....png
+│   ├── phish_blitz_000002_....png
+│   └── ...
+└── source_manifest.csv          # Optional traceability from original paths
+```
+
+Generated files:
+
+```text
+data/processed/phish_blitz_manifest.csv
+data/processed/phish_blitz_pending_manifest.csv
+data/processed/manifest.csv
+data/annotations/phish_blitz/
+├── ollama_gemma_annotations.jsonl
+├── ollama_gemma_failures.jsonl
+├── ollama_minicpm_annotations.jsonl
+├── ollama_minicpm_failures.jsonl
+└── local/
+    ├── agreement.csv
+    ├── final_agreement.csv
+    ├── human_review_queue.csv
+    └── final_adjudicated.csv
 ```
 
 Dataset rules:
 
-- Preserve the provided `train`, `val`, and `test` splits.
-- Each split contains `legitimate` and `phishing` classes.
-- Only `phishing` screenshots enter the four-intention annotation workflow.
-- `legitimate` screenshots remain in `manifest.csv` with `annotation_status=not_applicable` and all four intention labels set to `0`.
-- The optional `url/` directory is preserved as metadata but is not consumed by the screenshot-only VLM pipeline.
-- Stable sample IDs are derived from `phishing_dataset:<relative_image_path>`.
-- Old manifests, annotations, agreement files, review queues, predictions, and metrics must not be reused because those artefacts reference the removed datasets and old sample IDs.
-
-The active source name is:
-
-```text
-phishing_dataset
-```
-
-After generating the manifest, verify that no legacy source remains:
-
-```bash
-python - <<'PY2'
-import pandas as pd
-
-df = pd.read_csv("data/processed/manifest.csv").fillna("")
-print(df["source"].value_counts(dropna=False))
-unexpected = sorted(set(df["source"]) - {"phishing_dataset"})
-if unexpected:
-    raise SystemExit(f"Unexpected legacy sources: {unexpected}")
-print("Manifest contains only the new dataset source.")
-PY2
-```
-
----
+- Use only captured screenshots. Do not access live phishing URLs.
+- Keep one copy of every exact image after SHA-256 deduplication.
+- Every active Phish-Blitz row has `source=phish_blitz` and `phishing_status=phishing`.
+- Unannotated intention fields must remain empty. Do not initialize them to zero.
+- `annotation_status=pending` means the image is ready for annotation.
+- Stable sample IDs are derived from image-content hashes.
+- Do not reuse annotations built from deleted duplicates or obsolete sample IDs.
 
 ## Architecture
 
 ```text
 Screenshot
-  → Vision Analysis Agent
-  → TF-IDF retrieval from common threat KB
-  → Initial multi-label classifier
-  → Selected intention specialists
-  → Category-specific TF-IDF retrieval
-  → Validation and evidence synthesis
-  → Labels, confidence, evidence and trace
+  -> Vision Analysis Agent
+  -> TF-IDF retrieval from common threat KB
+  -> Initial multi-label classifier
+  -> Selected intention specialists
+  -> Category-specific TF-IDF retrieval
+  -> Validation and evidence synthesis
+  -> Labels, confidence, evidence, and trace
 ```
 
 Modes:
@@ -90,17 +79,19 @@ Modes:
 
 ```text
 Gemma 3 12B + MiniCPM-V 8B
-              ↓
+              |
        Agreement comparison
-              ↓ disputed labels only
+              |
+       disputed labels only
+              |
    Mistral Small 3.1 24B
-              ↓
+              |
        Mandatory human review
-              ↓
+              |
        final_adjudicated.csv
-              ↓
+              |
         Apply to manifest.csv
-              ↓
+              |
   Evaluate Qwen2.5-VL pipeline
 ```
 
@@ -109,37 +100,20 @@ Roles:
 - `gemma3:12b`: primary local annotator A
 - `minicpm-v:8b`: primary local annotator B
 - `mistral-small3.1:24b`: provisional tie-breaker for disputed labels
-- human reviewer: final ground-truth authority
+- Human reviewer: final ground-truth authority
 - `qwen2.5vl:72b`: evaluated model
 
-Mistral must not overwrite labels on which the primary annotators agree. Every Mistral-resolved row remains `requires_human_review=True` until reviewed.
-
----
+Mistral must not overwrite labels on which the primary annotators agree. Every Mistral-resolved row remains marked `requires_human_review=True` until reviewed.
 
 # First-time setup
 
-## 1. Prerequisites
-
-Install Python 3.11, Git, Ollama, and the new phishing screenshot dataset.
-
-```bash
-brew install ollama
-```
-
-## 2. Enter the project
+## 1. Enter the project
 
 ```bash
 cd "/Users/praks4/Workspace/Personal/mtech_project/PhishIntentionLLM"
 ```
 
-For a new clone:
-
-```bash
-git clone <repository-url>
-cd PhishIntentionLLM
-```
-
-## 3. Create the environment
+## 2. Create and activate the environment
 
 ```bash
 python3.11 -m venv .venv
@@ -158,9 +132,7 @@ python -m compileall -q src scripts tests
 python -m pytest -q
 ```
 
-The fully local workflow needs packages including `pandas`, `numpy`, `Pillow`, `pydantic`, `python-dotenv`, `requests`, `scikit-learn`, `streamlit`, and `pytest`. OpenAI, Gemini, and Groq SDKs are not required by the active workflow.
-
-## 4. Configure `.env`
+## 3. Configure `.env`
 
 ```dotenv
 OLLAMA_BASE_URL=http://localhost:11434
@@ -168,7 +140,7 @@ OLLAMA_BASE_URL=http://localhost:11434
 # Evaluated model
 OLLAMA_MODEL=qwen2.5vl:72b
 
-# Main pipeline
+# Pipeline
 CONFIDENCE_THRESHOLD=0.55
 TOP_K=3
 MAX_IMAGE_WIDTH=1280
@@ -180,7 +152,7 @@ OLLAMA_ANNOTATOR_1_MODEL=gemma3:12b
 OLLAMA_ANNOTATOR_2_NAME=minicpm
 OLLAMA_ANNOTATOR_2_MODEL=minicpm-v:8b
 
-# Provisional tie-breaker
+# Tie-breaker
 OLLAMA_ADJUDICATOR_NAME=mistral
 OLLAMA_ADJUDICATION_MODEL=mistral-small3.1:24b
 
@@ -194,300 +166,194 @@ OLLAMA_USE_JSON_SCHEMA=true
 
 Do not commit `.env`.
 
-## 5. Start Ollama and pull models
+## 4. Start Ollama and pull models
 
 ```bash
 brew services start ollama
 ```
 
-Or:
+Alternatively:
 
 ```bash
 ollama serve
 ```
 
-Pull models:
+Pull and verify models:
 
 ```bash
 ollama pull gemma3:12b
 ollama pull minicpm-v:8b
 ollama pull mistral-small3.1:24b
 ollama pull qwen2.5vl:72b
-```
-
-Verify:
-
-```bash
-ollama --version
 ollama list
-ollama ps
 curl -s http://localhost:11434/api/tags | python -m json.tool
 ```
 
 Avoid keeping all large models loaded simultaneously.
 
----
+# Dataset preparation
 
-# New dataset
-
-## 6. Required layout
-
-The former Phish-IRIS and Putra datasets are removed from the active workflow. The project now uses:
-
-```text
-<dataset-root>/
-├── image/
-│   ├── train/
-│   │   ├── legitimate/
-│   │   └── phishing/
-│   ├── val/
-│   │   ├── legitimate/
-│   │   └── phishing/
-│   └── test/
-│       ├── legitimate/
-│       └── phishing/
-└── url/                         # Optional metadata, not used for image inference
-```
-
-Supported image extensions are `.png`, `.jpg`, `.jpeg`, `.webp`, `.bmp`, and `.gif`.
-
-## 7. Migrate the repository
-
-Copy and compile the migration script:
-
-```bash
-cp "/path/to/migrate_to_new_dataset.py" scripts/migrate_to_new_dataset.py
-python -m py_compile scripts/migrate_to_new_dataset.py
-```
+## 5. Remove exact duplicate image files
 
 Dry run:
 
 ```bash
-python scripts/migrate_to_new_dataset.py \
+python scripts/remove_duplicate_phish_blitz_images.py \
+  --images data/raw/phish_blitz/images \
+  --report data/processed/phish_blitz_duplicate_images.csv
+```
+
+Review:
+
+```bash
+python - <<'PY'
+import pandas as pd
+p = "data/processed/phish_blitz_duplicate_images.csv"
+df = pd.read_csv(p)
+print("Duplicate groups:", df["duplicate_group"].nunique())
+print("Files to delete:", (df["action"] == "delete").sum())
+PY
+```
+
+Delete verified exact duplicates:
+
+```bash
+python scripts/remove_duplicate_phish_blitz_images.py \
+  --images data/raw/phish_blitz/images \
+  --report data/processed/phish_blitz_duplicate_images.csv \
+  --delete
+```
+
+Verify:
+
+```bash
+python scripts/remove_duplicate_phish_blitz_images.py \
+  --images data/raw/phish_blitz/images
+```
+
+Expected result: zero exact duplicate groups.
+
+## 6. Regenerate the Phish-Blitz manifest
+
+```bash
+python scripts/build_phish_blitz_manifest.py \
   --project-root . \
-  --dataset-root "/absolute/path/to/Phishing dataset" \
-  --source-name phishing_dataset \
-  --dry-run
+  --images data/raw/phish_blitz/images \
+  --output data/processed/phish_blitz_manifest.csv \
+  --seed 42 \
+  --train-ratio 0.70 \
+  --validation-ratio 0.15
 ```
 
-Apply migration:
+The remaining 15% is assigned to `test`.
 
-```bash
-python scripts/migrate_to_new_dataset.py \
-  --project-root . \
-  --dataset-root "/absolute/path/to/Phishing dataset" \
-  --source-name phishing_dataset \
-  --create-dataset-symlink \
-  --archive-outputs \
-  --remove-old-raw
-```
-
-The migration:
-
-- validates all six class folders;
-- backs up the README, manifest, preparation script, annotations and optional outputs;
-- replaces the old dataset-specific `prepare_data.py`;
-- resets prior annotations because sample IDs no longer match;
-- creates stable IDs from source name and relative image path;
-- generates the new manifest;
-- optionally removes the previous raw datasets;
-- optionally links `data/raw/phishing_dataset` to the external dataset;
-- writes `migration_report.json`.
-
-Backups are stored under `migration_backups/`.
-
-After migration, these legacy dataset folders must not remain active:
+Expected schema:
 
 ```text
-data/raw/phish_iris
-data/raw/putra
+sample_id,source,split,dataset_class,phishing_status,image_path,
+relative_image_path,image_filename,brand,website_id,screenshot_variant,
+annotation_status,annotator,notes,credential_theft,financial_fraud,
+malware_distribution,personal_information_harvesting
 ```
 
-Verify removal:
+The header must be exactly `brand`. Remove any accidental HTML markup around that column name.
 
-```bash
-for path in data/raw/phish_iris data/raw/putra; do
-  if [ -e "$path" ]; then
-    echo "Legacy dataset still exists: $path"
-  fi
-done
-```
-
-No output is expected.
-
-## 8. Generate the manifest directly
-
-```bash
-python scripts/prepare_data.py \
-  --dataset-root "/absolute/path/to/Phishing dataset" \
-  --output data/processed/manifest.csv \
-  --source-name phishing_dataset
-```
-
-Phishing rows receive:
-
-```text
-phishing_status = phishing
-annotation_status = unlabelled
-```
-
-Legitimate rows receive:
-
-```text
-phishing_status = legitimate
-annotation_status = not_applicable
-credential_theft = 0
-financial_fraud = 0
-malware_distribution = 0
-personal_information_harvesting = 0
-```
-
-Only known phishing screenshots enter the four-intention annotation workflow. Legitimate images are retained for reference or a separate phishing-detection experiment.
-
-## 9. Validate the manifest
+## 7. Validate the generated manifest
 
 ```bash
 python - <<'PY'
 from pathlib import Path
 import pandas as pd
 
-df = pd.read_csv("data/processed/manifest.csv").fillna("")
-missing = df[~df["image_path"].map(lambda x: Path(str(x)).exists())]
+p = "data/processed/phish_blitz_manifest.csv"
+df = pd.read_csv(p, dtype=str, keep_default_na=False)
 
-print("Total records:", len(df))
+missing = []
+for value in df["image_path"]:
+    path = Path(value).expanduser()
+    if not path.is_absolute():
+        path = Path.cwd() / path
+    if not path.exists():
+        missing.append(str(path))
+
+print("Rows:", len(df))
 print("Unique sample IDs:", df["sample_id"].nunique())
-print("Unique image paths:", df["image_path"].nunique())
-print("\nCounts by split and class:")
-print(df.groupby(["split", "dataset_class"]).size().to_string())
-print("\nMissing image paths:", len(missing))
-print("Phishing annotation candidates:", int((df["annotation_status"] == "unlabelled").sum()))
-print("Legitimate reference records:", int((df["annotation_status"] == "not_applicable").sum()))
+print("Duplicate sample IDs:", df["sample_id"].duplicated().sum())
+print("Duplicate image paths:", df["image_path"].duplicated().sum())
+print("Missing images:", len(missing))
+print("\nSplits:")
+print(df["split"].value_counts(dropna=False))
+print("\nStatuses:")
+print(df["annotation_status"].value_counts(dropna=False))
+
+assert len(df) == df["sample_id"].nunique()
+assert not df["image_path"].duplicated().any()
+assert not missing
+print("\nVALIDATION PASSED")
 PY
 ```
 
-Required checks:
+## 8. Activate the regenerated manifest
 
-```text
-Total records = Unique sample IDs
-Total records = Unique image paths
-Missing image paths = 0
-```
-
----
-
-# Git configuration
-
-## 10. Update `.gitignore`
+If Phish-Blitz is the only active dataset:
 
 ```bash
-cp "/path/to/update_gitignore.py" scripts/update_gitignore.py
-python scripts/update_gitignore.py --project-root . --dry-run
-python scripts/update_gitignore.py --project-root .
-```
-
-The generated rules ignore raw or linked datasets, generated manifests, annotations, outputs, migration backups, experiment archives, secrets, virtual environments, and local model files. Source code, tests, README files, `knowledge/*.json`, `.env.example`, and `.gitkeep` placeholders remain trackable.
-
-`.gitignore` does not untrack files that were committed earlier. Inspect and untrack generated artefacts:
-
-```bash
-git ls-files data/raw data/processed data/annotations outputs migration_backups experiments archive
-
-git rm -r --cached \
-  data/raw data/processed data/annotations outputs \
-  migration_backups experiments archive \
+mkdir -p data/backups
+cp data/processed/manifest.csv \
+  "data/backups/manifest_before_phish_blitz_$(date +%Y%m%d_%H%M%S).csv" \
   2>/dev/null || true
-
-git add \
-  data/raw/.gitkeep \
-  data/processed/.gitkeep \
-  data/annotations/.gitkeep \
-  outputs/.gitkeep
-
-git status --short
+cp data/processed/phish_blitz_manifest.csv data/processed/manifest.csv
 ```
 
-Validate representative rules:
+Do not append an older Phish-Blitz manifest. It may reference deleted duplicate files or obsolete sample IDs.
 
-```bash
-git check-ignore -v \
-  data/processed/manifest.csv \
-  data/annotations/ollama_gemma_annotations.jsonl \
-  data/annotations/local/final_adjudicated.csv \
-  outputs/predictions_gated.jsonl \
-  data/raw/phishing_dataset
-```
+## 9. Create the annotation-only manifest
 
----
-
-# Knowledge base and UI
-
-## 11. Validate the RAG KB
+The annotation script filters only `phishing_status == phishing`. A dedicated manifest prevents unrelated phishing rows from other sources from entering this run.
 
 ```bash
 python - <<'PY'
-import json
 from pathlib import Path
+import pandas as pd
 
-for path in sorted(Path("knowledge").glob("*.json")):
-    entries = json.loads(path.read_text(encoding="utf-8"))
-    print(f"{path.name}: {len(entries)} entries")
+source = Path("data/processed/manifest.csv")
+target = Path("data/processed/phish_blitz_pending_manifest.csv")
+
+df = pd.read_csv(source, dtype=str, keep_default_na=False)
+subset = df[
+    df["source"].str.strip().str.lower().eq("phish_blitz")
+    & df["phishing_status"].str.strip().str.lower().eq("phishing")
+    & df["annotation_status"].str.strip().str.lower().isin(["pending", "unlabelled"])
+].copy()
+
+missing = []
+for index, row in subset.iterrows():
+    path = Path(row["image_path"]).expanduser()
+    if not path.is_absolute():
+        path = Path.cwd() / path
+    path = path.resolve()
+    if not path.exists():
+        missing.append((row["sample_id"], str(path)))
+    subset.at[index, "image_path"] = str(path)
+
+if missing:
+    pd.DataFrame(missing, columns=["sample_id", "image_path"]).to_csv(
+        "data/processed/phish_blitz_missing_images.csv", index=False
+    )
+    raise RuntimeError("Missing images found")
+
+if subset["sample_id"].duplicated().any():
+    raise RuntimeError("Duplicate sample IDs found")
+
+subset.to_csv(target, index=False)
+print("Pending rows:", len(subset))
+print("Output:", target)
 PY
 ```
 
-The TF-IDF retrieval score ranks KB entries. It is not a classification probability.
+# Annotation workflow
 
-## 12. Start Streamlit
-
-Recommended:
-
-```bash
-python -m streamlit run app.py
-```
-
-Alternative:
-
-```bash
-streamlit run app.py
-```
-
-Because the annotation tab selects `annotation_status == "unlabelled"`, only phishing screenshots appear as pending. Legitimate screenshots are excluded because they are marked `not_applicable`.
-
----
-
-# Local annotation implementation
-
-## 13. Shared schemas
-
-All providers must use the shared Pydantic models in:
-
-```text
-src/phishintention/annotators/schemas.py
-```
-
-Every annotation contains all four label decisions plus `image_quality`, `exclusion_reason`, and `annotation_notes`. Do not duplicate `LabelDecision` or `AnnotationOutput` classes in provider modules.
-
-## 14. Generic Ollama annotator
-
-`src/phishintention/annotators/ollama_annotator.py` must:
-
-- use the shared schema;
-- resize with separate maximum width and height;
-- preserve aspect ratio for tall webpages;
-- include `sample_id` in debug filenames;
-- expose Ollama response bodies on HTTP failure;
-- support JSON Schema mode and JSON fallback;
-- validate every response with Pydantic.
-
-Recommended bounds:
-
-```text
-maximum width = 1280
-maximum height = 4096
-```
-
-## 15. Local annotation script
-
-`scripts/annotate_ollama.py` supports:
+The active annotation script supports:
 
 ```text
 --provider-name
@@ -498,161 +364,226 @@ maximum height = 4096
 --force
 ```
 
-Resume order:
+Resume is automatic. Do not pass `--resume`. Do not pass `--output`, `--source`, or `--annotator`.
 
-```text
-Load manifest
-→ select phishing rows
-→ load completed IDs
-→ exclude completed rows
-→ apply --limit
-```
+The commands below assume the script filename is `scripts/annotate_ollama.py`. If the repository file is named `scripts/annotate_local_ollama.py`, replace only the script filename and keep the arguments unchanged.
 
-Expected files:
-
-```text
-data/annotations/ollama_gemma_annotations.jsonl
-data/annotations/ollama_gemma_failures.jsonl
-data/annotations/ollama_minicpm_annotations.jsonl
-data/annotations/ollama_minicpm_failures.jsonl
-```
-
-## 16. Provider-neutral agreement
+## 10. Create output directories
 
 ```bash
-python scripts/calculate_annotation_agreement.py \
-  --annotation-a data/annotations/ollama_gemma_annotations.jsonl \
-  --annotation-b data/annotations/ollama_minicpm_annotations.jsonl \
-  --provider-a gemma \
-  --provider-b minicpm \
-  --output-dir data/annotations/local \
-  --create-image-links
+mkdir -p data/annotations/phish_blitz/smoke
+mkdir -p data/annotations/phish_blitz/local
+mkdir -p logs/phish_blitz
+```
+
+## 11. Gemma pilot
+
+```bash
+ollama stop minicpm-v:8b 2>/dev/null || true
+ollama stop mistral-small3.1:24b 2>/dev/null || true
+ollama stop qwen2.5vl:72b 2>/dev/null || true
+
+python scripts/annotate_ollama.py \
+  --provider-name gemma \
+  --model gemma3:12b \
+  --manifest data/processed/phish_blitz_pending_manifest.csv \
+  --output-dir data/annotations/phish_blitz/smoke \
+  --limit 10 \
+  --force
 ```
 
 Expected output:
 
 ```text
-data/annotations/local/agreement.csv
+data/annotations/phish_blitz/smoke/ollama_gemma_annotations.jsonl
+data/annotations/phish_blitz/smoke/ollama_gemma_failures.jsonl
 ```
 
-## 17. Dedicated local adjudication
-
-Use `scripts/adjudicate_local_ollama.py`, not the old Groq retry script.
-
-The script must:
-
-1. load `agreement.csv`;
-2. create missing final columns;
-3. select label or image-quality disagreements;
-4. preserve agreed labels;
-5. ask Mistral only about disputed labels;
-6. merge direct agreements and provisional decisions;
-7. write `final_agreement.csv` without overwriting `agreement.csv`;
-8. maintain a Mistral cache and deduplicated failure log;
-9. set `requires_human_review=True` for Mistral-resolved rows.
-
-Use provider-neutral provenance:
-
-```text
-local_primary_agreement
-ollama_mistral_tiebreaker
-ollama_mistral_failed
-human_review
-```
-
-Use `adjudicator_model`, not `groq_model`.
-
----
-
-# Run annotation
-
-## 18. Gemma pilot
+## 12. MiniCPM pilot
 
 ```bash
-ollama stop minicpm-v:8b
-ollama stop mistral-small3.1:24b
-ollama stop qwen2.5vl:72b
-
-python scripts/annotate_ollama.py \
-  --provider-name gemma \
-  --model gemma3:12b \
-  --limit 10
-```
-
-## 19. MiniCPM pilot
-
-```bash
-ollama stop gemma3:12b
+ollama stop gemma3:12b 2>/dev/null || true
 
 python scripts/annotate_ollama.py \
   --provider-name minicpm \
   --model minicpm-v:8b \
-  --limit 10
+  --manifest data/processed/phish_blitz_pending_manifest.csv \
+  --output-dir data/annotations/phish_blitz/smoke \
+  --limit 10 \
+  --force
 ```
 
-## 20. Verify equal coverage
+## 13. Validate pilot output
 
 ```bash
 python - <<'PY'
 import json
 from pathlib import Path
 
+labels = [
+    "credential_theft",
+    "financial_fraud",
+    "malware_distribution",
+    "personal_information_harvesting",
+]
+
+for provider in ["gemma", "minicpm"]:
+    path = Path(
+        f"data/annotations/phish_blitz/smoke/"
+        f"ollama_{provider}_annotations.jsonl"
+    )
+    records = [
+        json.loads(line)
+        for line in path.read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
+    print(f"\n{provider}: {len(records)} records")
+    for record in records[:3]:
+        annotation = record.get("annotation", {})
+        missing = [label for label in labels if label not in annotation]
+        print(record.get("sample_id"), "missing labels:", missing)
+        if missing:
+            raise RuntimeError(f"{provider} output is missing labels")
+print("\nPILOT VALIDATION PASSED")
+PY
+```
+
+## 14. Run full Gemma annotation
+
+```bash
+ollama stop minicpm-v:8b 2>/dev/null || true
+ollama stop mistral-small3.1:24b 2>/dev/null || true
+ollama stop qwen2.5vl:72b 2>/dev/null || true
+
+python scripts/annotate_ollama.py \
+  --provider-name gemma \
+  --model gemma3:12b \
+  --manifest data/processed/phish_blitz_pending_manifest.csv \
+  --output-dir data/annotations/phish_blitz \
+  2>&1 | tee logs/phish_blitz/gemma.log
+```
+
+To resume after interruption, run the same command without `--force`:
+
+```bash
+python scripts/annotate_ollama.py \
+  --provider-name gemma \
+  --model gemma3:12b \
+  --manifest data/processed/phish_blitz_pending_manifest.csv \
+  --output-dir data/annotations/phish_blitz \
+  2>&1 | tee -a logs/phish_blitz/gemma.log
+```
+
+## 15. Run full MiniCPM annotation
+
+```bash
+ollama stop gemma3:12b 2>/dev/null || true
+
+python scripts/annotate_ollama.py \
+  --provider-name minicpm \
+  --model minicpm-v:8b \
+  --manifest data/processed/phish_blitz_pending_manifest.csv \
+  --output-dir data/annotations/phish_blitz \
+  2>&1 | tee logs/phish_blitz/minicpm.log
+```
+
+Resume using the same command without `--force` and with `tee -a`.
+
+## 16. Verify equal primary-annotator coverage
+
+```bash
+python - <<'PY'
+import json
+from pathlib import Path
+import pandas as pd
+
+manifest = pd.read_csv(
+    "data/processed/phish_blitz_pending_manifest.csv",
+    dtype=str,
+    keep_default_na=False,
+)
+expected = set(manifest["sample_id"])
+
 def ids(path):
     path = Path(path)
     if not path.exists():
         return set()
-    return {json.loads(line)["sample_id"] for line in path.read_text().splitlines() if line.strip()}
+    return {
+        str(json.loads(line).get("sample_id", ""))
+        for line in path.read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    }
 
-gemma = ids("data/annotations/ollama_gemma_annotations.jsonl")
-minicpm = ids("data/annotations/ollama_minicpm_annotations.jsonl")
+gemma = ids("data/annotations/phish_blitz/ollama_gemma_annotations.jsonl")
+minicpm = ids("data/annotations/phish_blitz/ollama_minicpm_annotations.jsonl")
+
+print("Expected:", len(expected))
 print("Gemma:", len(gemma))
 print("MiniCPM:", len(minicpm))
 print("Shared:", len(gemma & minicpm))
+print("Missing Gemma:", len(expected - gemma))
+print("Missing MiniCPM:", len(expected - minicpm))
 print("Only Gemma:", len(gemma - minicpm))
 print("Only MiniCPM:", len(minicpm - gemma))
+
+if expected != gemma or expected != minicpm:
+    raise RuntimeError("Primary annotator coverage is incomplete")
+print("\nCOVERAGE VALIDATION PASSED")
 PY
 ```
 
-## 21. Full primary annotation
+Rerunning an annotator without `--force` retries failures because only successful IDs are treated as completed.
 
-```bash
-ollama stop minicpm-v:8b
-ollama stop mistral-small3.1:24b
-ollama stop qwen2.5vl:72b
-python scripts/annotate_ollama.py --provider-name gemma --model gemma3:12b
-
-ollama stop gemma3:12b
-python scripts/annotate_ollama.py --provider-name minicpm --model minicpm-v:8b
-```
-
-## 22. Calculate agreement
+## 17. Calculate provider-neutral agreement
 
 ```bash
 python scripts/calculate_annotation_agreement.py \
-  --annotation-a data/annotations/ollama_gemma_annotations.jsonl \
-  --annotation-b data/annotations/ollama_minicpm_annotations.jsonl \
+  --annotation-a data/annotations/phish_blitz/ollama_gemma_annotations.jsonl \
+  --annotation-b data/annotations/phish_blitz/ollama_minicpm_annotations.jsonl \
   --provider-a gemma \
   --provider-b minicpm \
-  --output-dir data/annotations/local \
+  --output-dir data/annotations/phish_blitz/local \
   --create-image-links
 ```
 
-## 23. Mistral adjudication
+Expected output:
 
-```bash
-ollama stop gemma3:12b
-ollama stop minicpm-v:8b
-ollama stop qwen2.5vl:72b
+```text
+data/annotations/phish_blitz/local/agreement.csv
 ```
 
-Pilot:
+## 18. Inspect agreement counts
 
 ```bash
+python - <<'PY'
+import pandas as pd
+p = "data/annotations/phish_blitz/local/agreement.csv"
+df = pd.read_csv(p, dtype=str, keep_default_na=False)
+print("Rows:", len(df))
+for column in [
+    "agreement_status",
+    "requires_adjudication",
+    "requires_human_review",
+    "image_quality_agreement",
+]:
+    if column in df.columns:
+        print(f"\n{column}:")
+        print(df[column].value_counts(dropna=False))
+PY
+```
+
+## 19. Run the Mistral tie-breaker pilot
+
+```bash
+ollama stop gemma3:12b 2>/dev/null || true
+ollama stop minicpm-v:8b 2>/dev/null || true
+ollama stop qwen2.5vl:72b 2>/dev/null || true
+
 python scripts/adjudicate_local_ollama.py \
-  --agreement data/annotations/local/agreement.csv \
-  --output data/annotations/local/final_agreement.csv \
-  --annotation-a data/annotations/ollama_gemma_annotations.jsonl \
-  --annotation-b data/annotations/ollama_minicpm_annotations.jsonl \
+  --agreement data/annotations/phish_blitz/local/agreement.csv \
+  --output data/annotations/phish_blitz/local/final_agreement.csv \
+  --annotation-a data/annotations/phish_blitz/ollama_gemma_annotations.jsonl \
+  --annotation-b data/annotations/phish_blitz/ollama_minicpm_annotations.jsonl \
   --provider-a gemma \
   --provider-b minicpm \
   --model mistral-small3.1:24b \
@@ -660,46 +591,55 @@ python scripts/adjudicate_local_ollama.py \
   --sleep 0
 ```
 
-Full run:
+## 20. Run full Mistral adjudication
+
+If the pilot wrote to `final_agreement.csv`, remove the pilot output only when the adjudication script does not resume safely. Otherwise, the full command may continue from its cache.
 
 ```bash
 python scripts/adjudicate_local_ollama.py \
-  --agreement data/annotations/local/agreement.csv \
-  --output data/annotations/local/final_agreement.csv \
-  --annotation-a data/annotations/ollama_gemma_annotations.jsonl \
-  --annotation-b data/annotations/ollama_minicpm_annotations.jsonl \
+  --agreement data/annotations/phish_blitz/local/agreement.csv \
+  --output data/annotations/phish_blitz/local/final_agreement.csv \
+  --annotation-a data/annotations/phish_blitz/ollama_gemma_annotations.jsonl \
+  --annotation-b data/annotations/phish_blitz/ollama_minicpm_annotations.jsonl \
   --provider-a gemma \
   --provider-b minicpm \
   --model mistral-small3.1:24b \
-  --sleep 0
+  --sleep 0 \
+  2>&1 | tee logs/phish_blitz/mistral_adjudication.log
 ```
 
----
+# Human review
 
-# Human approval
-
-## 24. Generate the review queue
+## 21. Create the human-review queue
 
 ```bash
 python - <<'PY'
 import pandas as pd
 
-source = "data/annotations/local/final_agreement.csv"
-target = "data/annotations/local/human_review_queue.csv"
-df = pd.read_csv(source).fillna("")
-mask = df["requires_human_review"].astype(str).str.strip().str.lower().isin(["true", "1", "yes", "y"])
+source = "data/annotations/phish_blitz/local/final_agreement.csv"
+target = "data/annotations/phish_blitz/local/human_review_queue.csv"
+
+df = pd.read_csv(source, dtype=str, keep_default_na=False)
+mask = (
+    df["requires_human_review"]
+    .astype(str)
+    .str.strip()
+    .str.lower()
+    .isin(["true", "1", "yes", "y"])
+)
 review = df[mask].copy()
 review["human_review_completed"] = ""
 review["human_review_notes"] = ""
 review.to_csv(target, index=False)
 print("Human-review rows:", len(review))
+print("Output:", target)
 PY
 ```
 
-Open:
+Open the queue:
 
 ```bash
-open data/annotations/local/human_review_queue.csv
+open data/annotations/phish_blitz/local/human_review_queue.csv
 ```
 
 Verify or correct all four `final_*` labels, then set:
@@ -709,85 +649,160 @@ human_review_completed = 1
 human_review_notes = concise screenshot-visible justification
 ```
 
-## 25. Verify completion
+## 22. Verify human-review completion
 
 ```bash
 python - <<'PY'
 import pandas as pd
-
-df = pd.read_csv("data/annotations/local/human_review_queue.csv").fillna("")
-completed = df["human_review_completed"].astype(str).str.strip().str.lower().isin(["1", "true", "yes", "y"])
+p = "data/annotations/phish_blitz/local/human_review_queue.csv"
+df = pd.read_csv(p, dtype=str, keep_default_na=False)
+completed = (
+    df["human_review_completed"]
+    .astype(str)
+    .str.strip()
+    .str.lower()
+    .isin(["1", "true", "yes", "y"])
+)
 print("Total:", len(df))
 print("Completed:", int(completed.sum()))
 print("Incomplete:", int((~completed).sum()))
+if (~completed).any():
+    raise RuntimeError("Human review is incomplete")
 PY
 ```
 
-## 26. Finalise and apply labels
+## 23. Finalize and apply labels
 
 ```bash
 python scripts/finalise_annotations.py \
-  --agreement data/annotations/local/final_agreement.csv \
-  --review data/annotations/local/human_review_queue.csv \
-  --output data/annotations/local/final_adjudicated.csv
+  --agreement data/annotations/phish_blitz/local/final_agreement.csv \
+  --review data/annotations/phish_blitz/local/human_review_queue.csv \
+  --output data/annotations/phish_blitz/local/final_adjudicated.csv
+```
 
+Back up and apply:
+
+```bash
 cp data/processed/manifest.csv \
   data/processed/manifest_before_local_adjudication.csv
 
 python scripts/apply_adjudicated_labels.py \
   --manifest data/processed/manifest.csv \
-  --adjudicated data/annotations/local/final_adjudicated.csv
+  --adjudicated data/annotations/phish_blitz/local/final_adjudicated.csv
 ```
 
----
+## 24. Validate applied ground truth
+
+```bash
+python - <<'PY'
+import pandas as pd
+
+p = "data/processed/manifest.csv"
+df = pd.read_csv(p, dtype=str, keep_default_na=False)
+active = df[df["source"].str.lower().eq("phish_blitz")].copy()
+labels = [
+    "credential_theft",
+    "financial_fraud",
+    "malware_distribution",
+    "personal_information_harvesting",
+]
+
+print("Phish-Blitz rows:", len(active))
+print("\nAnnotation status:")
+print(active["annotation_status"].value_counts(dropna=False))
+
+truthy = {"1", "true", "yes", "y"}
+for label in labels:
+    values = active[label].astype(str).str.strip().str.lower()
+    print(
+        f"{label}: positives={values.isin(truthy).sum()}, "
+        f"empty={values.eq('').sum()}"
+    )
+
+if any(active[label].astype(str).str.strip().eq("").any() for label in labels):
+    raise RuntimeError("Some final intention labels are empty")
+PY
+```
 
 # Evaluation
 
-## 27. Evaluator interface
-
-```bash
-python scripts/evaluate.py --help
-```
-
 The current evaluator supports `--manifest`, `--mode`, and `--limit`. Do not pass unsupported `--provider` or `--force` arguments.
 
-## 28. Run evaluation
+## 25. Smoke-test evaluation
 
 ```bash
-python scripts/evaluate.py --manifest data/processed/manifest.csv --mode gated --limit 1
-python scripts/evaluate.py --manifest data/processed/manifest.csv --mode gated --limit 5
-python scripts/evaluate.py --manifest data/processed/manifest.csv --mode single
-python scripts/evaluate.py --manifest data/processed/manifest.csv --mode always
-python scripts/evaluate.py --manifest data/processed/manifest.csv --mode gated
+python scripts/evaluate.py \
+  --manifest data/processed/manifest.csv \
+  --mode gated \
+  --limit 1
 ```
 
-The evaluator should use only phishing rows with final adjudicated intention labels. Legitimate rows are outside the four-intention task unless a separate phishing-detection experiment is implemented.
+```bash
+python scripts/evaluate.py \
+  --manifest data/processed/manifest.csv \
+  --mode gated \
+  --limit 5
+```
 
-Report micro precision, micro recall, micro F1, per-intention precision/recall/F1/support, exact subset accuracy, and Accuracy by Complexity.
+## 26. Run all evaluation modes
 
----
+```bash
+ollama stop gemma3:12b 2>/dev/null || true
+ollama stop minicpm-v:8b 2>/dev/null || true
+ollama stop mistral-small3.1:24b 2>/dev/null || true
+
+python scripts/evaluate.py \
+  --manifest data/processed/manifest.csv \
+  --mode single \
+  2>&1 | tee logs/phish_blitz/evaluation_single.log
+
+python scripts/evaluate.py \
+  --manifest data/processed/manifest.csv \
+  --mode always \
+  2>&1 | tee logs/phish_blitz/evaluation_always.log
+
+python scripts/evaluate.py \
+  --manifest data/processed/manifest.csv \
+  --mode gated \
+  2>&1 | tee logs/phish_blitz/evaluation_gated.log
+```
+
+The evaluator should use only known phishing rows with final adjudicated intention labels.
+
+Expected metrics:
+
+- Micro precision
+- Micro recall
+- Micro F1
+- Per-intention precision, recall, F1, and support
+- Exact subset accuracy
+- Accuracy by complexity
 
 # Troubleshooting
 
-## Missing dataset folders
+## Annotation script filename differs
 
-The dataset must contain all six folders under `image/{train,val,test}/{legitimate,phishing}`.
-
-## Missing image paths
-
-Regenerate `manifest.csv` after moving the external dataset.
+If the file is named `scripts/annotate_local_ollama.py`, replace `scripts/annotate_ollama.py` in the commands. The supported arguments remain the same.
 
 ## Pilot produces no new rows
 
-Ensure completed IDs are excluded before applying `--limit`.
+The smoke directory may already contain completed IDs. Either remove only the smoke JSONL files or rerun with `--force`.
 
-## Tall screenshots become unreadable
+## Full annotation resumes
 
-Preserve aspect ratio with separate width and height limits. Do not force a square thumbnail.
+Do not use `--force`. The script reads completed IDs from `ollama_<provider>_annotations.jsonl` and skips them automatically.
 
-## Mistral changes agreed labels
+## Failure files keep growing
 
-Preserve primary agreement and use Mistral only for disputed labels.
+Failure logs are append-only. Rerunning retries unresolved sample IDs. Determine unresolved failures by subtracting successful IDs from failed IDs.
+
+## All intention counts are zero
+
+Stop before evaluation. Inspect the nested `annotation` object in both JSONL files and verify that all four decisions are present and parsed correctly. Empty fields must never be converted to zero before adjudication.
+
+## Missing image paths
+
+Regenerate `phish_blitz_manifest.csv` after moving or deleting images, then recreate `phish_blitz_pending_manifest.csv`.
 
 ## Ollama HTTP 500
 
@@ -798,33 +813,29 @@ grep -Ei "error|failed|panic|memory|alloc|runner|500|vision" \
   ~/.ollama/logs/server.log | tail -n 100
 ```
 
-## `.gitignore` appears ineffective
+## Tall screenshots become unreadable
 
-The file may already be tracked. Remove generated files from the Git index with `git rm --cached`, then re-add `.gitkeep` placeholders.
-
----
+Preserve aspect ratio with separate maximum width and height limits. Recommended bounds are 1280 pixels wide and 4096 pixels high.
 
 # Reproducibility checklist
 
 - [ ] Python 3.11 and `.venv` configured
-- [ ] dependencies installed and tests pass
+- [ ] Dependencies installed and tests pass
 - [ ] `.env` configured
 - [ ] Ollama and all four models available
-- [ ] new dataset has all six class folders
-- [ ] migration dry run succeeds
-- [ ] old dataset artefacts archived
-- [ ] new manifest generated and validated
-- [ ] `.gitignore` updated and generated files untracked
-- [ ] KB validated
-- [ ] Streamlit starts
+- [ ] Flattened screenshots copied to `data/raw/phish_blitz/images`
+- [ ] Exact duplicate images removed
+- [ ] Fresh Phish-Blitz manifest generated
+- [ ] Manifest validation passes
+- [ ] Annotation-only manifest created
 - [ ] Gemma and MiniCPM pilots succeed
-- [ ] equal coverage confirmed
-- [ ] provider-neutral agreement generated
-- [ ] Mistral pilot and full run complete
-- [ ] every tie-breaker row human-reviewed
-- [ ] final adjudicated labels applied to manifest
-- [ ] single, always, and gated evaluations complete
+- [ ] Equal primary-annotator coverage confirmed
+- [ ] Provider-neutral agreement generated
+- [ ] Mistral tie-breaker completed for disagreements
+- [ ] Every tie-breaker row human-reviewed
+- [ ] Final adjudicated labels applied to `manifest.csv`
+- [ ] Single, always, and gated evaluations complete
 
 ## Recommended methodology wording
 
-> The project used one screenshot dataset organised into train, validation and test splits with legitimate and phishing class folders. Only known phishing screenshots entered the four-intention annotation workflow. Gemma 3 12B and MiniCPM-V 8B independently annotated each phishing screenshot using the same label definitions and structured schema. Labels on which both primary annotators agreed were preserved. Mistral Small 3.1 24B produced provisional decisions only for disputed labels. Every Mistral-resolved row received human verification. Only final human-approved labels were applied to the manifest and used as ground truth for evaluating the Qwen2.5-VL multi-agent RAG architecture.
+The project used a recent, deduplicated collection of captured Phish-Blitz webpage screenshots. Only known phishing screenshots entered the four-intention annotation workflow. Gemma 3 12B and MiniCPM-V 8B independently annotated each screenshot using the same label definitions and structured schema. Labels on which both primary annotators agreed were preserved. Mistral Small 3.1 24B produced provisional decisions only for disputed labels. Every Mistral-resolved row received human verification. Only final human-approved labels were applied to the manifest and used as ground truth for evaluating the Qwen2.5-VL multi-agent RAG architecture.

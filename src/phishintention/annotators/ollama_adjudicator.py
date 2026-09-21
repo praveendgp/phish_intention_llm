@@ -75,7 +75,7 @@ ADJUDICATION_PROMPT = """
 You are a defensive cybersecurity dataset adjudicator.
 
 Review a static phishing-webpage screenshot and two independent
-annotations produced by OpenAI and Gemini.
+annotations produced by two independent local Ollama models.
 
 Resolve every disagreement using only evidence visibly present in
 the current screenshot.
@@ -117,13 +117,13 @@ RULES
 9. Use short evidence statements.
 10. Return only one valid JSON object.
 
-OpenAI annotation:
+Provider A annotation:
 
-{openai_annotation}
+{annotation_a}
 
-Gemini annotation:
+Provider B annotation:
 
-{gemini_annotation}
+{annotation_b}
 
 Disagreement labels:
 
@@ -367,8 +367,8 @@ class OllamaAdjudicator:
     def annotate(
         self,
         image_path: str | Path,
-        openai_annotation: dict[str, Any],
-        gemini_annotation: dict[str, Any],
+        annotation_a: dict[str, Any],
+        annotation_b: dict[str, Any],
         disagreement_labels: list[str],
     ) -> tuple[
         OllamaAdjudicationOutput,
@@ -376,13 +376,13 @@ class OllamaAdjudicator:
     ]:
         prompt = (
             ADJUDICATION_PROMPT.format(
-                openai_annotation=json.dumps(
-                    openai_annotation,
+                annotation_a=json.dumps(
+                    annotation_a,
                     indent=2,
                     ensure_ascii=False,
                 ),
-                gemini_annotation=json.dumps(
-                    gemini_annotation,
+                annotation_b=json.dumps(
+                    annotation_b,
                     indent=2,
                     ensure_ascii=False,
                 ),
