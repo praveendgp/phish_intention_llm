@@ -7,22 +7,26 @@ the `images` field - this is the mechanism by which every agent in the framework
 
 Robustness
 ----------
-Small open-weight VLMs fail in two characteristic ways. Both are handled here
-by *changing* the request before retrying, because an identical retry can never
+Small open-weight VLMs fail in three characteristic ways. All are handled by
+*changing* the request before retrying, because an identical retry can never
 succeed:
 
 1. **Token-repeat loop** (MiniCPM-V, Moondream)
        HTTP 500 {"error":"prediction aborted, token repeat limit reached"}
-   -> capped `num_predict`, repeat penalties, then retry without the JSON
+   -> capped `num_predict` and repeat penalties, then retry without the JSON
       grammar, then retry shorter and slightly warmer.
 
 2. **Context overflow** (Granite-Vision 2B and other small-context models)
        HTTP 400 {"error":{"code":400,"message":"request (8268 tokens) exceeds
                  the available context size (8192 tokens)", ...}}
-   -> the required size is parsed from the error, `num_ctx` is raised to fit
-      (up to a configurable ceiling), then the *image* is down-scaled (vision
-      tokens usually dominate), then the prompt is trimmed. Only after all
-      three fail does the call error out, with actionable advice.
+   -> raise `num_ctx` to fit (up to a ceiling), then down-scale the image
+      (vision tokens dominate), then trim the prompt.
+
+3. **Empty response** (small models over-constrained by the JSON grammar)
+       200 OK with  {"response": ""}
+   -> retry without the JSON grammar, then warmer, then with a shorter prompt
+      and an explicit JSON primer. An empty generation is a *decoding* failure,
+      not a transport failure, so plain retries are never used for it.
 """
 
 from __future__ import annotations
@@ -42,16 +46,19 @@ from ..utils.logging import get_logger
 
 log = get_logger(__name__)
 
-# Server-side markers for a degenerate generation loop.
 _LOOP_MARKERS = ("token repeat limit reached", "prediction aborted", "repeat limit")
-
-# Server-side markers for a prompt that does not fit the context window.
 _CONTEXT_MARKERS = ("exceed_context_size", "exceeds the available context",
                     "context size", "n_ctx")
 
 _TOKENS_RE = re.compile(r"request\s*\((\d+)\s*tokens?\)", re.I)
 _NCTX_RE = re.compile(r'"n_ctx"\s*:\s*(\d+)')
 _AVAIL_RE = re.compile(r"available context size\s*\((\d+)", re.I)
+
+# Appended when a model returns nothing - nudges it to start emitting JSON.
+_JSON_PRIMER = (
+    "\n\nRespond now with the JSON object only. Begin your reply with the "
+    "character { and end it with }. Do not add any commentary."
+)
 
 
 class OllamaError(RuntimeError):
@@ -66,6 +73,10 @@ class ContextOverflowError(OllamaError):
     """Raised when a prompt cannot be made to fit the model's context window."""
 
 
+class EmptyResponseError(OllamaError):
+    """Raised when a model keeps returning nothing at all."""
+
+
 @dataclass
 class LLMResponse:
     text: str
@@ -75,20 +86,22 @@ class LLMResponse:
     json_mode: bool = True
     degraded: bool = False          # JSON grammar had to be dropped
     shrunk_image: bool = False      # image was down-scaled to fit the context
-    trimmed_prompt: bool = False    # prompt text was truncated to fit
+    trimmed_prompt: bool = False    # prompt text was truncated
+    primed: bool = False            # JSON primer was appended
     num_ctx: int = 0
     raw: Dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass
 class _Attempt:
-    """One rung of the recovery ladder."""
+    """One rung of a recovery ladder."""
     json_grammar: bool
     num_ctx: int
     num_predict: Optional[int] = None
     temp_bump: float = 0.0
-    image_scale: float = 1.0        # 1.0 = original encoding
-    prompt_budget: Optional[int] = None   # max characters of `prompt`
+    image_scale: float = 1.0
+    prompt_budget: Optional[int] = None
+    primer: bool = False
     reason: str = ""
 
 
@@ -113,21 +126,25 @@ class OllamaClient:
         }
 
         # --- context-overflow recovery ---------------------------------
-        # Hard ceiling when growing num_ctx (VRAM guard).
         self.max_num_ctx = int(self.cfg.get("ollama.max_num_ctx", 16384))
-        # Successive image down-scales tried when growing num_ctx is not enough.
         self.image_scale_ladder = [
             float(s) for s in
             (self.cfg.get("ollama.image_scale_ladder", [0.7, 0.5]) or [])
         ]
-        # Rough chars-per-token used only for prompt trimming estimates.
         self.chars_per_token = float(self.cfg.get("ollama.chars_per_token", 3.6))
+
+        # --- empty-response recovery -----------------------------------
+        # Temperature floor used when a model returns nothing: greedy decoding
+        # at very low temperature is a common cause of empty generations.
+        self.empty_temp_floor = float(
+            self.cfg.get("ollama.empty_response_temperature", 0.35))
 
         # Telemetry
         self.vision_calls = 0
         self.text_calls = 0
         self.degraded_calls = 0
         self.context_recoveries = 0
+        self.empty_recoveries = 0
 
     # ------------------------------------------------------------------
     # transport
@@ -170,7 +187,6 @@ class OllamaClient:
         return any(m.split(":")[0] == base for m in available)
 
     def supports_vision(self, name: str) -> Optional[bool]:
-        """Best-effort check of a model's multimodal capability via /api/show."""
         try:
             data = self._post("/api/show", {"name": name})
         except Exception:
@@ -183,7 +199,6 @@ class OllamaClient:
         return any(k in blob for k in ("clip", "vision", "mllama", "vit", "image"))
 
     def context_length(self, name: str) -> Optional[int]:
-        """Model's trained context length, when Ollama reports it."""
         try:
             data = self._post("/api/show", {"name": name})
         except Exception:
@@ -242,15 +257,15 @@ class OllamaClient:
             return image_b64
         try:
             from PIL import Image
-        except Exception:  # pragma: no cover - Pillow is a listed dependency
+        except Exception:  # pragma: no cover
             return image_b64
         try:
             raw = base64.b64decode(image_b64)
             with Image.open(io.BytesIO(raw)) as img:
                 img = img.convert("RGB")
                 width, height = img.size
-                new_size = (max(64, int(width * scale)), max(64, int(height * scale)))
-                img = img.resize(new_size, Image.LANCZOS)
+                img = img.resize((max(64, int(width * scale)),
+                                  max(64, int(height * scale))), Image.LANCZOS)
                 buffer = io.BytesIO()
                 img.save(buffer, format="PNG", optimize=True)
                 return base64.b64encode(buffer.getvalue()).decode("ascii")
@@ -263,9 +278,7 @@ class OllamaClient:
     # ------------------------------------------------------------------
     @staticmethod
     def _parse_context_error(detail: str) -> Tuple[Optional[int], Optional[int]]:
-        """Return (tokens_required, current_n_ctx) from an overflow message."""
-        required = None
-        available = None
+        required = available = None
         match = _TOKENS_RE.search(detail)
         if match:
             required = int(match.group(1))
@@ -316,10 +329,8 @@ class OllamaClient:
             _Attempt(json_grammar=self._wants_json_grammar(spec, json_mode),
                      num_ctx=role_ctx, reason="initial")
         ]
-        loop_fallbacks_used = 0
-        context_fallbacks_used = 0
+        loop_used = context_used = empty_used = 0
         plain_retries = 0
-
         last_error: Optional[Exception] = None
         index = 0
 
@@ -340,6 +351,8 @@ class OllamaClient:
                                + "\n\n[... context trimmed to fit the model's "
                                  "context window ...]\n\n"
                                + prompt[-keep_tail:])
+            if attempt.primer:
+                send_prompt = send_prompt + _JSON_PRIMER
 
             payload: Dict[str, Any] = {
                 "model": spec.model,
@@ -359,8 +372,35 @@ class OllamaClient:
             try:
                 data = self._post("/api/generate", payload)
                 text = (data.get("response") or "").strip()
+
+                # ---------- empty generation ------------------------------
                 if not text:
-                    raise OllamaError("Empty response from model")
+                    reason = data.get("done_reason") or "unknown"
+                    step = self._next_empty_attempt(spec, attempt, empty_used,
+                                                    temperature)
+                    if step is not None:
+                        empty_used += 1
+                        log.warning(
+                            "%s (role '%s') returned an empty response "
+                            "(done_reason=%s) - %s.",
+                            spec.model, spec.role, reason, step.reason)
+                        queue.insert(index, step)
+                        continue
+                    raise EmptyResponseError(
+                        f"Model '{spec.model}' (role '{spec.role}') returned an "
+                        f"empty response on every attempt "
+                        f"(done_reason={reason}).\n"
+                        f"  This is a decoding failure, not a transport error.\n"
+                        f"  Fixes:\n"
+                        f"    (a) set  models.{spec.role}.json_format: false  "
+                        f"- the JSON grammar over-constrains small models;\n"
+                        f"    (b) raise  models.{spec.role}.temperature  to "
+                        f"~0.3 - greedy decoding can emit only a stop token;\n"
+                        f"    (c) lower  framework.max_image_edge  to 896 - an "
+                        f"oversized image can crowd out the response budget;\n"
+                        f"    (d) swap role '{spec.role}' for a sturdier VLM, "
+                        f"e.g. gemma3:4b or gemma3:12b."
+                    )
 
                 if images:
                     self.vision_calls += 1
@@ -371,13 +411,15 @@ class OllamaClient:
                     self.degraded_calls += 1
                 if attempt.image_scale < 1.0 or attempt.prompt_budget:
                     self.context_recoveries += 1
+                if attempt.primer or attempt.temp_bump:
+                    self.empty_recoveries += 1
 
                 return LLMResponse(
                     text=text, model=spec.model, latency=time.time() - started,
                     had_image=bool(images), json_mode=attempt.json_grammar,
                     degraded=degraded, shrunk_image=attempt.image_scale < 1.0,
                     trimmed_prompt=bool(attempt.prompt_budget),
-                    num_ctx=attempt.num_ctx, raw=data,
+                    primed=attempt.primer, num_ctx=attempt.num_ctx, raw=data,
                 )
 
             except urllib.error.HTTPError as exc:  # pragma: no cover
@@ -395,10 +437,9 @@ class OllamaClient:
                     required, current = self._parse_context_error(detail)
                     current = current or attempt.num_ctx
                     step = self._next_context_attempt(
-                        attempt, required, current, ceiling,
-                        context_fallbacks_used, len(send_prompt))
+                        attempt, required, current, ceiling, len(send_prompt))
                     if step is not None:
-                        context_fallbacks_used += 1
+                        context_used += 1
                         log.warning(
                             "%s (role '%s'): prompt needs %s tokens but n_ctx is "
                             "%s - %s.", spec.model, spec.role,
@@ -411,18 +452,18 @@ class OllamaClient:
                         f"  Fixes:\n"
                         f"    (a) raise  models.{spec.role}.num_ctx  (and "
                         f"ollama.max_num_ctx) if you have the VRAM;\n"
-                        f"    (b) lower  framework.max_image_edge  (e.g. 896 or "
-                        f"768) - image tokens dominate this prompt;\n"
+                        f"    (b) lower  framework.max_image_edge  (e.g. 896) - "
+                        f"image tokens dominate this prompt;\n"
                         f"    (c) point role '{spec.role}' at a larger-context "
-                        f"VLM, e.g. gemma3:12b or minicpm-v:8b.\n"
+                        f"VLM, e.g. gemma3:12b.\n"
                         f"  Server said: {detail}"
                     ) from exc
 
                 # ---------- degenerate loop ----------------------------
                 if self._is_loop_error(detail):
-                    step = self._next_loop_attempt(attempt, loop_fallbacks_used)
+                    step = self._next_loop_attempt(attempt, loop_used)
                     if step is not None:
-                        loop_fallbacks_used += 1
+                        loop_used += 1
                         log.warning("%s hit a token-repeat loop - %s.",
                                     spec.model, step.reason)
                         queue.insert(index, step)
@@ -436,10 +477,14 @@ class OllamaClient:
                         f"  Server said: {detail}"
                     ) from exc
 
+            except (VisionCapabilityError, ContextOverflowError,
+                    EmptyResponseError):
+                # Actionable configuration failures - blind retries cannot help.
+                raise
             except Exception as exc:  # pragma: no cover
                 last_error = exc
 
-            # ---------- generic retry (transient failures only) --------
+            # ---------- generic retry (transport failures only) --------
             if index >= len(queue) and plain_retries < self.max_retries - 1:
                 plain_retries += 1
                 sleep_for = self.backoff * plain_retries
@@ -452,6 +497,7 @@ class OllamaClient:
                                       num_predict=attempt.num_predict,
                                       image_scale=attempt.image_scale,
                                       prompt_budget=attempt.prompt_budget,
+                                      primer=attempt.primer,
                                       reason="transient retry"))
 
         raise OllamaError(
@@ -462,44 +508,82 @@ class OllamaClient:
     # ------------------------------------------------------------------
     # recovery ladders
     # ------------------------------------------------------------------
+    def _next_empty_attempt(self, spec: ModelSpec, attempt: _Attempt, used: int,
+                            temperature: Optional[float]) -> Optional[_Attempt]:
+        """Fixed three-rung ladder: drop the grammar, warm up, then shrink.
+
+        The ladder is indexed by `used` (how many empty responses this call has
+        already produced), so every rung is guaranteed to run exactly once even
+        though the ladder is rebuilt on each failure.
+        """
+        base_temp = temperature if temperature is not None else spec.temperature
+        warm = max(0.25, self.empty_temp_floor - base_temp)
+
+        def rung(temp_bump: float, scale: float, budget: Optional[int],
+                 predict: Optional[int], reason: str) -> _Attempt:
+            return _Attempt(
+                json_grammar=False,                 # never re-apply the grammar
+                num_ctx=attempt.num_ctx,
+                num_predict=predict if predict is not None else attempt.num_predict,
+                temp_bump=temp_bump,
+                image_scale=scale,
+                prompt_budget=budget,
+                primer=True,
+                reason=reason,
+            )
+
+        smaller = min(0.7, attempt.image_scale * 0.7) if attempt.image_scale > 0.5 \
+            else attempt.image_scale
+
+        ladder = [
+            # 1 - the JSON grammar over-constrains small models
+            rung(0.0, attempt.image_scale, attempt.prompt_budget, None,
+                 "retrying without the JSON grammar"),
+            # 2 - greedy decoding can emit nothing but a stop token
+            rung(warm, attempt.image_scale, attempt.prompt_budget, None,
+                 f"retrying warmer (+{warm:.2f})"),
+            # 3 - free up room for the model to actually speak
+            rung(warm + 0.10, smaller,
+                 min(attempt.prompt_budget or 10_000, 6000),
+                 max(512, self.num_predict),
+                 "retrying with a smaller image and a shorter prompt"),
+        ]
+        return ladder[used] if used < len(ladder) else None
+
     def _next_context_attempt(self, attempt: _Attempt, required: Optional[int],
-                              current: int, ceiling: int, used: int,
+                              current: int, ceiling: int,
                               prompt_chars: int) -> Optional[_Attempt]:
         """Grow the window, then shrink the image, then trim the prompt."""
-        # Step 1 - raise num_ctx to fit, if the ceiling allows it.
         if required and current < ceiling:
             target = min(ceiling, max(current * 2, int(required * 1.15) + 256))
             target = int(round(target / 512.0) * 512)
             if target > current:
-                return _Attempt(json_grammar=attempt.json_grammar,
-                                num_ctx=target,
+                return _Attempt(json_grammar=attempt.json_grammar, num_ctx=target,
                                 num_predict=attempt.num_predict,
                                 image_scale=attempt.image_scale,
                                 prompt_budget=attempt.prompt_budget,
+                                primer=attempt.primer,
                                 reason=f"raising num_ctx to {target}")
 
-        # Step 2 - down-scale the image (vision tokens usually dominate).
         ladder = [s for s in self.image_scale_ladder if s < attempt.image_scale]
         if ladder:
             scale = ladder[0]
             return _Attempt(json_grammar=attempt.json_grammar,
                             num_ctx=min(ceiling, max(attempt.num_ctx, current)),
-                            num_predict=attempt.num_predict,
-                            image_scale=scale,
+                            num_predict=attempt.num_predict, image_scale=scale,
                             prompt_budget=attempt.prompt_budget,
+                            primer=attempt.primer,
                             reason=f"down-scaling the screenshot to {scale:.0%}")
 
-        # Step 3 - trim the prompt text to an estimated safe budget.
         if attempt.prompt_budget is None and required:
             window = min(ceiling, max(current, attempt.num_ctx))
-            overflow_tokens = max(256, required - window + 512)
-            budget = max(1200, prompt_chars - int(overflow_tokens * self.chars_per_token))
+            overflow = max(256, required - window + 512)
+            budget = max(1200, prompt_chars - int(overflow * self.chars_per_token))
             if budget < prompt_chars:
-                return _Attempt(json_grammar=attempt.json_grammar,
-                                num_ctx=window,
+                return _Attempt(json_grammar=attempt.json_grammar, num_ctx=window,
                                 num_predict=attempt.num_predict,
                                 image_scale=attempt.image_scale,
-                                prompt_budget=budget,
+                                prompt_budget=budget, primer=attempt.primer,
                                 reason=f"trimming the prompt to ~{budget} chars")
         return None
 
@@ -509,12 +593,12 @@ class OllamaClient:
             _Attempt(json_grammar=False, num_ctx=attempt.num_ctx,
                      num_predict=attempt.num_predict,
                      image_scale=attempt.image_scale,
-                     prompt_budget=attempt.prompt_budget,
+                     prompt_budget=attempt.prompt_budget, primer=attempt.primer,
                      reason="retrying without the JSON grammar"),
             _Attempt(json_grammar=False, num_ctx=attempt.num_ctx,
                      num_predict=max(256, self.num_predict // 2), temp_bump=0.15,
                      image_scale=attempt.image_scale,
-                     prompt_budget=attempt.prompt_budget,
+                     prompt_budget=attempt.prompt_budget, primer=attempt.primer,
                      reason="retrying shorter and slightly warmer"),
         ]
         return ladder[used] if used < len(ladder) else None

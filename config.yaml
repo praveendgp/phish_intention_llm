@@ -62,9 +62,9 @@ models:
     label: "Annotator-A (MiniCPM-V)"
 
   annotator_b:
-    model: "granite3.2-vision:2b"
+    model: "gemma3:12b"
     vision: true
-    temperature: 0.1
+    temperature: 0.2
     top_p: 0.9
     label: "Annotator-B (Granite-Vision)"
     num_ctx: 12288
@@ -77,11 +77,11 @@ models:
     label: "Manifest Tie-Breaker (Mistral-Small-3.2)"
 
   manifest_finalizer:
-    model: "gemma3:12b"
+    model: "mistral-small3.2:24b"
     vision: true
     temperature: 0.0
     top_p: 0.9
-    label: "Manifest Finaliser (Gemma-3)"
+    label: "Manifest Finalizer (Mistral-Small-3.2)"
 
   # ---------- B) FRAMEWORK STAGE (the five paper layers) ----------
   vision:

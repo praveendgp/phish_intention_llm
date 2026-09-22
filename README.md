@@ -2,9 +2,9 @@
 
 **Uncovering Phishing Website Intentions through Multi-Agent Retrieval-Augmented Generation**
 
-A faithful re-implementation of *PhishIntentionLLM* (Li, Manickam, Chong & Karuppayah — ICDF2C 2025), built for an MTech project and adapted to run entirely on **local open-source vision-language models served by Ollama**.
+A complete implementation of *PhishIntentionLLM* (Li, Manickam, Chong & Karuppayah — ICDF2C 2025), adapted to run entirely on **local open-source vision-language models served by Ollama**.
 
-The framework answers a question ordinary phishing detectors ignore: not *“is this page phishing?”* but ***“what does the attacker actually want?”*** — across four intentions:
+Ordinary phishing detectors answer *“is this page phishing?”*. This project answers ***“what does the attacker actually want?”*** across four intentions:
 
 | | Intention | What the attacker is after |
 |---|---|---|
@@ -15,64 +15,59 @@ The framework answers a question ordinary phishing detectors ignore: not *“is 
 
 ---
 
-## 🧭 Two stages, one clean separation
+## 📖 Read this first: how the project works
 
-This is the core design of the project:
+There are **two independent stages**, and the order matters. This is the single most important thing to understand before running anything.
 
 ```
-                    ┌──────────────────── STAGE A · MANIFEST ─────────────────────┐
-  screenshot ──────►│  Annotator A (VLM) ─┐                                       │
-                    │                      ├─► tie-break ─► finaliser ─► manifest │────┐
-                    │  Annotator B (VLM) ─┘   (on dispute)              .jsonl    │    │
-                    └─────────────────────────────────────────────────────────────┘    │
-                                                                                       │   reference
-                    ┌──────────────── STAGE B · FRAMEWORK (5 layers) ───────────────┐  │ labels
-  screenshot ──────►│ 👁️ Vision → 🧠 Context → 🏷️ Classify → 🔬 Experts → ✅ Validate │──│
-                    └───────────────────────────────────────────────────────────────┘  │
-                                                                                       ▼
-                                                                                📊 EVALUATION
+                    ┌──────────────── STAGE A · MANIFEST ────────────────┐
+  screenshot ──────►│  Annotator A (VLM) ─┐                              │
+                    │                      ├─► tie-break ─► finaliser    │──┐
+                    │  Annotator B (VLM) ─┘   (only on dispute)          │  │
+                    └───────────────────────────────────────────────────┘  │
+                              writes  data/outputs/manifest.jsonl           │
+                                                                             │ reference
+                    ┌──────────── STAGE B · FRAMEWORK (5 layers) ───────┐   │ labels
+  screenshot ──────►│ 👁️ Vision → 🧠 Context → 🏷️ Classify → 🔬 Experts → ✅ │──┤
+                    └───────────────────────────────────────────────────┘   │
+                            writes  data/outputs/predictions.jsonl           │
+                                                                             ▼
+                                                                   📊 EVALUATION
 ```
 
-* **Annotators build the manifest.** Two independent VLMs label every screenshot; a tie-breaker rules on genuine disputes; a finaliser signs off one manifest row per sample. `manifest.jsonl` is the **reference label set**.
-* **The framework predicts.** The five paper layers analyse the same screenshot and emit `predictions.jsonl`. It never reads the manifest, so the evaluation stays honest.
-* **Evaluation scores one against the other** using the paper's metric suite.
+**Stage A — the annotators build the answer key.** Two different vision models label each screenshot independently. When they disagree, a third model breaks the tie. A fourth signs off the final label. The result, `manifest.jsonl`, is the **reference** you will measure against.
 
-## 👁️ Every agent is a VLM
+**Stage B — the framework takes the exam.** The five layers from the paper analyse the same screenshots and write `predictions.jsonl`. The framework **never reads the manifest** — that separation is what makes the evaluation meaningful.
 
-**All nine agents receive the screenshot itself**, not a text transcript of it. This is enforced in code, not just by convention:
+**Evaluation scores B against A.**
 
-* `VisionAgent.ask_json()` **requires** an `image_b64` argument and raises `VisionCapabilityError` without one.
-* Agent construction fails fast if its configured model declares `vision: false`.
-* `OllamaClient.generate()` refuses to send images to a non-vision model.
-* The UI stamps every flow node with a **`VLM · sees image`** badge, and each result reports how many vision calls it made.
-* `scripts/check_setup.py` probes `/api/show` and flags any model that is not multimodal.
-
-Layer 2 even folds elements it spots into the record under `missed_elements` when the perception layer under-reports them — only possible because it looks at the image itself.
+> **Every agent in both stages is a vision-language model that receives the screenshot itself** — never a text description of it. This is enforced in code: an agent whose model isn't multimodal refuses to start.
 
 ---
 
-## 🤖 Model line-up (constraints respected)
+## 1 · Install
 
-> None of the models evaluated in the paper (GPT-4o, GPT-4o-mini, Gemini-2.0-Flash, Qwen2.5-VL-72B) are used as annotators, and **no LLaMA-family model** appears anywhere.
+```bash
+unzip PhishIntentionLLM.zip -d PhishIntentionLLM
+cd PhishIntentionLLM
 
-**Stage A — manifest (annotators)**
+python -m venv .venv
+source .venv/bin/activate          # Windows: .venv\Scripts\activate
 
-| Role | Default model | Job |
-|---|---|---|
-| `annotator_a` | `minicpm-v:8b` | Independent label #1 |
-| `annotator_b` | `granite3.2-vision:2b` | Independent label #2 |
-| `manifest_tiebreaker` | `mistral-small3.2:24b` | Rules on disputed categories only |
-| `manifest_finalizer` | `gemma3:12b` | Signs off the manifest row |
+pip install -r requirements.txt
+```
 
-**Stage B — framework (the five paper layers)**
+Python 3.10 or newer.
 
-| Role | Default model | Layer |
-|---|---|---|
-| `vision` | `minicpm-v:8b` | 1 · Perception |
-| `context` | `gemma3:12b` | 2 · Context enrichment |
-| `classifier` | `gemma3:12b` | 3 · Multi-label classification |
-| `specialist` | `gemma3:12b` | 4 · Four expert agents |
-| `validator` | `mistral-small3.2:24b` | 5 · Validation & synthesis |
+## 2 · Start Ollama and pull the models
+
+Leave this running in its own terminal:
+
+```bash
+ollama serve
+```
+
+In a second terminal:
 
 ```bash
 ollama pull minicpm-v:8b
@@ -81,68 +76,242 @@ ollama pull gemma3:12b
 ollama pull mistral-small3.2:24b
 ```
 
-*Lighter machine?* Use `moondream` + `granite3.2-vision:2b` as annotators and `gemma3:4b` for everything else — all still multimodal.
+Roughly 25 GB total. All four are multimodal, none are from the paper, none are LLaMA-family.
 
----
+**Under 12 GB VRAM?** Use the light profile in [§9](#9--low-vram-profile) instead — pull `moondream` and `gemma3:4b` and skip the two large models.
 
-## 🚀 Quick start
+## 3 · Add the datasets
 
-```bash
-# 1 · install
-pip install -r requirements.txt
+Both sources keep their **original folder structure** — nothing needs renaming:
 
-# 2 · start Ollama (separate terminal) and pull the four models
-ollama serve
+```
+data/raw/putra/
+  phishing/<record-id>/screenshots/*.png
+                      /assets/            (optional: url.txt, meta.json)
+  not-phishing/<record-id>/screenshots/*.png
 
-# 3 · drop the datasets in place  (see data/raw/README.md)
-#     data/raw/putra/phishing/<record-id>/screenshots/*.png
-#     data/raw/phishIris/train/<brand>/*.png
-
-# 4 · verify everything (including VLM capability)
-python scripts/check_setup.py
-
-# 5 · launch the console
-./run_ui.sh              # Windows: run_ui.bat
+data/raw/phishIris/
+  train/<brand>/*.png       # apple, amazon, chase, dhl, paypal, … other
+  val/<brand>/*.png
 ```
 
-Then open <http://localhost:8501>.
+Full details in `data/raw/README.md`. No datasets yet? You can still try a single screenshot via the Analyse page.
+
+## 4 · Verify everything
+
+```bash
+python scripts/check_setup.py
+```
+
+This checks the knowledge base, both dataset paths, Ollama connectivity, that all nine model roles are pulled, **and that each one is genuinely multimodal**. Fix anything it flags before continuing — a green run here saves a lot of confusion later.
 
 ---
 
-## 🖥️ The console
+## 5 · Your first run (start small)
 
-| Page | What you do there |
+Do this before committing to a large batch. It takes about 10 minutes and proves the whole loop works end to end.
+
+```bash
+# Stage A · annotators label 5 screenshots
+python scripts/build_manifest.py --n 5
+
+# Stage B · framework predicts on those same 5
+python scripts/run_predictions.py --n 5 --scope manifest
+
+# Score the framework against the manifest
+python scripts/run_evaluation.py
+```
+
+`--scope manifest` restricts the run to samples that already have reference labels, so results are immediately scoreable.
+
+### Reading the manifest output
+
+```
+[  1/5] TB  putra::phishing::640b9757…  -> Credential Theft            (partial agreement, 66.7s)
+[  2/5] OK  phishiris::train::paypal…   -> Credential Theft, Financial Fraud (full agreement, 70.5s)
+```
+
+| Flag | Meaning |
 |---|---|
-| **🎣 Analyse** | Run one screenshot through the five layers; watch the agent flow live; compare the verdict against the manifest |
-| **📚 Dataset Explorer** | Browse both corpora, filter by brand, see which samples already have manifest labels |
-| **📋 Manifest Builder** | Run the annotator ensemble; inspect every manifest row, its votes, agreement and tie-break; export CSV/JSONL |
-| **🤖 Framework Predictions** | Batch-run the framework (or baseline) — optionally restricted to manifest-covered samples |
-| **📊 Evaluation** | Micro metrics, Acc_comp, per-class table, error analysis, reference quality, framework vs baseline |
-| **✍️ Manual Annotation** | Two engineers + reviewer protocol — and reviewer sign-off on flagged manifest rows |
-| **🧠 Knowledge Base** | Inspect K_B and K_c; test retrieval queries interactively |
-| **⚙️ Settings** | Ollama health, both model groups, multimodal capability audit |
+| `OK ` | The two annotators settled it themselves |
+| `TB ` | They disputed a category — the **tie-breaker** was invoked to rule on it |
+| `ERR` | Annotation failed for that sample |
 
-The agent flow renders as a live, stage-grouped chain:
+Seeing plenty of `TB` early on is healthy: it means your two annotators are genuinely independent. If *everything* is `TB`, they're diverging too much to produce a trustworthy reference.
+
+### Reading the evaluation output
+
+```
+=== Evaluation vs the manifest (5 samples) ===
+  Precision (micro) : 0.8571
+  Recall    (micro) : 0.8571
+  F1        (micro) : 0.8571
+  Overall accuracy  : 0.8000
+```
+
+**Precision** — of the intentions the framework claimed, how many the annotators agreed with.
+**Recall** — of the intentions the annotators found, how many the framework caught.
+**Overall accuracy** — how often the framework's label *set* matched exactly (strict: partial credit gets none).
+
+---
+
+## 6 · Scaling up
+
+Once the small run looks right:
+
+```bash
+# Stage A · build a proper reference set (plan ~60-90s per sample)
+python scripts/build_manifest.py --n 100 --csv data/outputs/manifest.csv
+
+# Stage B · framework
+python scripts/run_predictions.py --n 100 --scope manifest
+
+# Stage B · single-agent baseline, for the comparison in your report
+python scripts/run_predictions.py --n 100 --scope manifest --mode single
+
+# Evaluate, with a per-sample error breakdown
+python scripts/run_evaluation.py --errors
+```
+
+Both scripts skip work already done, so you can stop and resume freely:
+
+```bash
+python scripts/build_manifest.py  --n 200                 # only annotates new samples
+python scripts/run_predictions.py --n 200 --scope manifest --skip-done
+```
+
+### Check your manifest is sound
+
+If an annotator ever crashes, that row falls back to a single opinion with no cross-check — and it still counts as reference truth. Audit for this:
+
+```bash
+python -c "
+import json
+rows=[json.loads(l) for l in open('data/outputs/manifest.jsonl')]
+solo=[r for r in rows if r['agreement']=='single annotator']
+print(f'{len(solo)}/{len(rows)} rows have only one annotator')
+"
+```
+
+Re-annotate any you find:
+
+```bash
+python scripts/build_manifest.py --n 100 --overwrite
+```
+
+---
+
+## 7 · The UI
+
+```bash
+./run_ui.sh          # Windows: run_ui.bat
+```
+
+Open **http://localhost:8501**.
+
+| # | Page | What you do there |
+|---|---|---|
+| 1 | 📚 **Dataset Explorer** | Confirm both sources load; see which samples have manifest labels |
+| 2 | 📋 **Manifest Builder** | Run the annotators; inspect every row — votes, agreement, tie-break reasoning; export CSV |
+| 3 | ✍️ **Manual Annotation** | Two engineers + reviewer protocol; sign off ⚠️ flagged manifest rows |
+| 4 | 🤖 **Framework Predictions** | Batch-run the framework or baseline over manifest-covered samples |
+| 5 | 📊 **Evaluation** | Micro metrics, Acc_comp, per-class table, error analysis, run comparison |
+| — | 🎣 **Analyse** | Upload a single screenshot and watch the agents work — best for demos |
+| — | 🧠 **Knowledge Base** | Inspect K_B and K_c; test retrieval queries |
+| — | ⚙️ **Settings** | Ollama health, both model groups, multimodal capability audit |
+
+The agent flow animates live, grouped by stage, with each node showing its model and conclusion:
 
 ```
 MANIFEST STAGE
-🗳️  Annotator A            [VLM · sees image]   Labelled: CT 0.92          ● Done
-🗳️  Annotator B            [VLM · sees image]   Labelled: CT 0.92, PIH 0.55 ● Done
-⚖️  Tie-Breaker            [VLM · sees image]   Ruled on 1; kept: none      ● Done
-📝  Manifest Finaliser     [VLM · sees image]   Labels: CT (quality: high)  ● Done
+🗳️  Annotator A            [VLM · sees image]   Labelled: CT 0.92            ● Done
+🗳️  Annotator B            [VLM · sees image]   Labelled: CT 0.92, PIH 0.55  ● Done
+⚖️  Tie-Breaker            [VLM · sees image]   Ruled on 1; kept: none       ● Done
+📝  Manifest Finaliser     [VLM · sees image]   Labels: CT (quality: high)   ● Done
 
 FRAMEWORK STAGE
-👁️  Vision Analysis Agent  [VLM · sees image]   Saw 2 form fields, password ● Done
-🧠  Context Enrichment     [VLM · sees image]   Tagged 1, +1 missed element ● Done
-🏷️  Classification Agent   [VLM · sees image]   Nominated CT 0.93           ● Done
-🔬  Credential Theft Expert[VLM · sees image]   CONFIRMED CT @ 0.93         ● Done
-🔬  Financial Fraud Expert                      Not nominated               ◌ Skipped
-✅  Validation & Synthesis [VLM · sees image]   Final: CT 0.93              ● Done
+👁️  Vision Analysis Agent  [VLM · sees image]   Saw 2 form fields, password  ● Done
+🧠  Context Enrichment     [VLM · sees image]   Tagged 1, +1 missed element  ● Done
+🏷️  Classification Agent   [VLM · sees image]   Nominated CT 0.93            ● Done
+🔬  Credential Theft Expert[VLM · sees image]   CONFIRMED CT @ 0.93          ● Done
+🔬  Financial Fraud Expert                      Not nominated                ◌ Skipped
+✅  Validation & Synthesis [VLM · sees image]   Final: CT 0.93               ● Done
 ```
 
 ---
 
-## 🧩 Architecture
+## 8 · Optional: human ground truth
+
+The manifest is machine-generated. For a stronger claim in your report, add human labels using the paper's protocol — two engineers label independently, a reviewer signs off:
+
+1. **✍️ Manual Annotation** → select your identity → label samples → repeat as the second engineer → then as `reviewer`.
+2. Export and evaluate against it:
+
+```bash
+python scripts/build_ground_truth.py
+python scripts/run_evaluation.py --reference ground_truth
+```
+
+You can also have the reviewer verify machine-generated manifest rows in place (queue: *⚠️ Manifest flagged for review*), then score against only those:
+
+```bash
+python scripts/run_evaluation.py --verified-only
+```
+
+---
+
+## 9 · Low-VRAM profile
+
+Edit `config.yaml` — keep every model multimodal:
+
+```yaml
+models:
+  annotator_a:         {model: "moondream",            vision: true, temperature: 0.1}
+  annotator_b:         {model: "granite3.2-vision:2b", vision: true, temperature: 0.1}
+  manifest_tiebreaker: {model: "gemma3:4b",            vision: true, temperature: 0.0}
+  manifest_finalizer:  {model: "gemma3:4b",            vision: true, temperature: 0.0}
+  vision:              {model: "moondream",            vision: true, temperature: 0.1}
+  context:             {model: "gemma3:4b",            vision: true, temperature: 0.0}
+  classifier:          {model: "gemma3:4b",            vision: true, temperature: 0.0}
+  specialist:          {model: "gemma3:4b",            vision: true, temperature: 0.0}
+  validator:           {model: "gemma3:4b",            vision: true, temperature: 0.0}
+
+ollama:
+  num_ctx: 4096
+framework:
+  max_image_edge: 896
+```
+
+Keep the two annotators on **different model families** — that diversity is what makes the agreement signal meaningful.
+
+---
+
+## 10 · Troubleshooting
+
+| Symptom | Cause & fix |
+|---|---|
+| `token repeat limit reached` | Small VLM loops under Ollama's JSON grammar. Add the model to `ollama.disable_json_format_for`, or set `models.<role>.json_format: false` |
+| `exceeds the available context size` | Prompt + image too large. Lower `framework.max_image_edge` to `896` — image tokens dominate. Or raise `models.<role>.num_ctx` |
+| `(single annotator)` in the log | An annotator crashed; that row has no cross-check. Re-run with `--overwrite` |
+| `VisionCapabilityError` at startup | A role points at a text-only model — swap it in `config.yaml` |
+| Everything labelled Credential Theft | Raise `framework.confidence_threshold`; strengthen the `I_c` indicators for the other categories in `specialist_kb.json` |
+| Annotators always agree (IAA = 100%) | Your two annotator models are too similar — pick more distinct architectures |
+| Tie-breaker never fires | Lower `manifest.agreement_margin` (a solo claim escalates when its confidence < 1 − margin) |
+| Too slow | Smaller models, lower `max_image_edge`, or set `framework.enable_feedback_loop: false` |
+| Out of VRAM | Shrink `ollama.num_ctx`, use 2–4B VLMs, reduce `ollama.keep_alive` |
+
+### Test without Ollama
+
+```bash
+python tests/test_pipeline.py          # metrics, consensus, KB, manifest store
+python tests/test_end_to_end_mock.py   # both stages + a VLM-enforcement audit
+```
+
+The second prints an audit proving every agent call carried the screenshot.
+
+---
+
+## 11 · Architecture reference
 
 **Framework (Fig. 3 of the paper)**
 
@@ -156,80 +325,21 @@ Screenshot (encoded once, shared by every agent)
                   └── feedback loop if confidence < τ → widen to remaining categories
 ```
 
-**Knowledge architecture (Definition 1)**
+**Knowledge architecture (Definition 1)** — `K_B = {P_c, P_v, P_t, P_u}` and `K_c = {F_c, D_c}` with `D_c = {T_c, M_c, I_c}`, both in `data/knowledge_base/*.json`. Retrieval uses a dependency-free TF-IDF index by default; set `framework.embedding_model` for sentence-transformers.
 
-* `K_B = {P_c, P_v, P_t, P_u}` — common patterns, visual deception, text manipulation, URL red flags
-* `K_c = {F_c, D_c}` with `D_c = {T_c, M_c, I_c}` — per-category features, targets, techniques, indicators
+**Model roles**
 
-Both live in `data/knowledge_base/*.json`. Retrieval uses a dependency-free TF-IDF index by default; set `framework.embedding_model` for sentence-transformers.
+| Stage | Role | Default model |
+|---|---|---|
+| A | `annotator_a` | `minicpm-v:8b` |
+| A | `annotator_b` | `granite3.2-vision:2b` |
+| A | `manifest_tiebreaker` | `mistral-small3.2:24b` |
+| A | `manifest_finalizer` | `gemma3:12b` |
+| B | `vision` | `minicpm-v:8b` |
+| B | `context` / `classifier` / `specialist` | `gemma3:12b` |
+| B | `validator` | `mistral-small3.2:24b` |
 
----
-
-## 📁 Project layout
-
-```
-PhishIntentionLLM/
-├── config.yaml                  # models (2 groups), τ, datasets, storage
-├── run_ui.sh / run_ui.bat
-├── app/
-│   ├── streamlit_app.py         # main "Analyse" console
-│   ├── ui_components.py         # theme, stage-aware flow renderer, result cards
-│   └── pages/                   # 7 additional pages
-├── src/phishintentionllm/
-│   ├── agents/                  # base (VLM enforcement) + the 5 framework layers
-│   ├── annotation/              # annotators.py, manifest_builder.py, manual.py, store.py
-│   ├── datasets/                # putra.py, phishiris.py, registry.py
-│   ├── rag/                     # knowledge_base.py, retriever.py
-│   ├── pipeline/                # orchestrator.py, single_agent.py, batch.py
-│   ├── evaluation/              # metrics.py (Eq. 3-10), evaluator.py
-│   ├── llm/ollama_client.py     # vision-enforcing HTTP client
-│   └── utils/                   # image encoding, tolerant JSON parsing, logging
-├── data/
-│   ├── knowledge_base/          # K_B and K_c
-│   └── outputs/                 # manifest.jsonl · predictions.jsonl · runs/
-├── scripts/                     # check_setup, build_manifest, run_predictions, ...
-└── tests/                       # offline unit tests + mocked end-to-end test
-```
-
----
-
-## ⌨️ Command line
-
-```bash
-# health check (includes multimodal capability probe)
-python scripts/check_setup.py
-
-# STAGE A - annotators build the reference manifest
-python scripts/build_manifest.py --n 50 --csv data/outputs/manifest.csv
-
-# STAGE B - framework predicts on manifest-covered samples
-python scripts/run_predictions.py --n 50 --scope manifest
-
-# single-agent baseline for comparison
-python scripts/run_predictions.py --n 50 --scope manifest --mode single
-
-# evaluate predictions against the manifest
-python scripts/run_evaluation.py --errors
-
-# optional: human-reviewed ground truth instead of the manifest
-python scripts/build_ground_truth.py
-python scripts/run_evaluation.py --reference ground_truth
-```
-
----
-
-## 🧪 Tests
-
-```bash
-python tests/test_pipeline.py          # metrics, consensus, KB, manifest store, VLM config
-python tests/test_end_to_end_mock.py   # both stages + a VLM-enforcement audit
-```
-
-Neither needs Ollama. The end-to-end test asserts that **every agent call carried an image** and that zero text-only calls occurred.
-
----
-
-## 📐 Metrics implemented
+**Metrics implemented**
 
 | Metric | Equation in paper |
 |---|---|
@@ -238,21 +348,67 @@ Neither needs Ollama. The end-to-end test asserts that **every agent call carrie
 | Accuracy by complexity `Acc_comp(k)`, `t_k = 1,1,2` | Eq. 7–8 |
 | Per-class P / R / F1 / Accuracy | Eq. 9–10 |
 
-Plus set-level agreement (exact / partial / Jaccard), the credential-theft benchmark, co-occurrence and sector × intention analyses, and a **reference-quality panel** (inter-annotator agreement, tie-break rate, review backlog) so you can judge how much to trust the manifest itself.
+Plus set-level agreement, the credential-theft benchmark, co-occurrence and sector × intention analyses, and a reference-quality panel (inter-annotator agreement, tie-break rate, review backlog).
+
+**Project layout**
+
+```
+PhishIntentionLLM/
+├── config.yaml                  # models (2 groups), τ, datasets, storage
+├── run_ui.sh / run_ui.bat
+├── app/                         # Streamlit console (8 pages)
+├── src/phishintentionllm/
+│   ├── agents/                  # base (VLM enforcement) + the 5 framework layers
+│   ├── annotation/              # annotators, manifest_builder, manual, store
+│   ├── datasets/                # putra, phishiris, registry
+│   ├── rag/                     # knowledge_base, retriever
+│   ├── pipeline/                # orchestrator, single_agent, batch
+│   ├── evaluation/              # metrics (Eq. 3-10), evaluator
+│   ├── llm/                     # vision-enforcing Ollama client
+│   └── utils/                   # image encoding, tolerant JSON parsing, logging
+├── data/
+│   ├── knowledge_base/          # K_B and K_c
+│   └── outputs/                 # manifest.jsonl · predictions.jsonl · runs/
+├── scripts/                     # check_setup, build_manifest, run_predictions, …
+└── tests/                       # offline unit tests + mocked end-to-end test
+```
+
+See `docs/ARCHITECTURE.md` for the full paper-to-code mapping.
 
 ---
 
-## 🔧 Tuning notes
+## 12 · Command reference
 
-| Symptom | Fix |
-|---|---|
-| `VisionCapabilityError` at startup | A role points at a text-only model — swap it in `config.yaml` |
-| Manifest labels look noisy | Raise `manifest.min_confidence`; review flagged rows on the Manual Annotation page |
-| Annotators always agree (IAA = 100%) | Your two annotator models are too similar — pick more diverse architectures |
-| Tie-breaker never fires | Lower `manifest.agreement_margin` (a solo claim escalates when confidence < 1 − margin) |
-| Everything labelled Credential Theft | Raise `framework.confidence_threshold`; strengthen `I_c` indicators for other categories |
-| Pipeline too slow | Smaller models, lower `max_image_edge`, or `enable_feedback_loop: false` |
-| Out of VRAM | Shrink `ollama.num_ctx`, use 2–4B VLMs, reduce `ollama.keep_alive` |
+```bash
+# setup
+python scripts/check_setup.py
+
+# Stage A · manifest
+python scripts/build_manifest.py --n 100
+python scripts/build_manifest.py --n 100 --overwrite          # re-annotate
+python scripts/build_manifest.py --n 50 --sources putra       # one source only
+python scripts/build_manifest.py --n 50 --csv out.csv         # + CSV export
+
+# Stage B · predictions
+python scripts/run_predictions.py --n 100 --scope manifest
+python scripts/run_predictions.py --n 100 --scope manifest --mode single
+python scripts/run_predictions.py --n 100 --scope random --skip-done
+
+# evaluation
+python scripts/run_evaluation.py
+python scripts/run_evaluation.py --errors
+python scripts/run_evaluation.py --verified-only
+python scripts/run_evaluation.py --reference ground_truth
+python scripts/run_evaluation.py --compare \
+    data/outputs/runs/run_<framework_id>.json \
+    data/outputs/runs/run_<baseline_id>.json
+
+# human ground truth
+python scripts/build_ground_truth.py
+
+# UI
+./run_ui.sh
+```
 
 ---
 
@@ -260,6 +416,6 @@ Plus set-level agreement (exact / partial / Jaccard), the credential-theft bench
 
 Li, W., Manickam, S., Chong, Y.-W., & Karuppayah, S. (2025). *PhishIntentionLLM: Uncovering Phishing Website Intentions through Multi-Agent Retrieval-Augmented Generation.* ICDF2C 2025. arXiv:2507.15419
 
-Datasets: Putra phishing website dataset (Zenodo 8041387) · Phish-IRIS .
+Datasets: Putra phishing website dataset (Zenodo 8041387) · Phish-IRIS (Dalgic, Bozkir & Aydos, ISMSIT).
 
 > Research and educational use only. Handle phishing screenshots in an isolated environment.
