@@ -61,7 +61,8 @@ Return JSON:
 }}
 
 Score every category, including the ones you believe are absent (give them a
-low score). Nominate between 1 and {top_k} categories."""
+low score). Nominate between 1 and {top_k} categories.
+Nominate a category whenever its score is 0.45 or above, even if another category scores much higher. Do not nominate only the single strongest goal."""
 
 
 class ClassificationAgent(VisionAgent):

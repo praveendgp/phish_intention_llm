@@ -160,7 +160,8 @@ class PhishIntentionLLM:
             # ---------- Result formatting -----------------------------
             result.intentions = self._format_results(intentions, findings)
             result.specialist_findings = findings
-            result.sector = vmeta.get("sector") or elements.sector
+            result.sector = self.vision_agent._normalise_sector(vmeta.get("sector") or elements.sector)
+
             result.overall_confidence = vmeta.get("overall_confidence", 0.0)
             result.is_phishing = bool(vmeta.get("is_phishing", True))
             result.phishing_score = vmeta.get("phishing_score", 0.0)

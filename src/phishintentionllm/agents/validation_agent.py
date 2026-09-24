@@ -65,6 +65,7 @@ Return JSON:
 
 Rules:
 - Include a category only if a specialist confirmed it or the image evidence is decisive.
+- If a specialist CONFIRMED a category, include it unless the image plainly contradicts the specialist's evidence. A confirming specialist outranks your own impression.
 - Weigh a confirming specialist above a raw classification score.
 - Return at least one intention and at most three."""
 

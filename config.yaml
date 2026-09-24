@@ -15,7 +15,7 @@ project:
 ollama:
   host: "http://localhost:11434"
   request_timeout: 300
-  keep_alive: "10m"
+  keep_alive: "2m"
   num_ctx: 8192
   max_retries: 3
   retry_backoff: 2.0
@@ -123,7 +123,7 @@ models:
 # Framework behaviour (Algorithm, Fig. 3 of the paper)
 # ---------------------------------------------------------------------
 framework:
-  confidence_threshold: 0.60     # tau
+  confidence_threshold: 0.80     # tau
   top_k_categories: 3            # Top-k(S, k=3)
   min_categories: 1
   enable_feedback_loop: true

@@ -62,14 +62,26 @@ Return JSON:
 
 Labelling rules:
 - List between 1 and 3 intentions, ordered by confidence.
-- Every intention needs at least one concrete element you can see.
-- A password field alone means Credential Theft, not Personal Information Harvesting.
-- Card number / CVV / an amount to pay means Financial Fraud.
-- A download, install or update action means Malware Distribution.
-- Three or more identity fields (name, DOB, address, ID, phone) means
-  Personal Information Harvesting.
-- If the page looks legitimate, set is_phishing to false and return an empty
-  intentions list."""
+- Every intention needs at least one concrete element you can SEE in the image.
+  Never label on inference. If your evidence contains the words "implies",
+  "may", "likely", "suggests", "could" or "probably", you do NOT have evidence
+  - drop that category.
+- Credential Theft: a password, PIN, OTP or security-answer field is visible.
+- Personal Information Harvesting requires TWO OR MORE visible input fields
+  collecting identity data beyond the account identifier, OR one strong
+  identifier (national ID, SSN, Aadhaar, passport, driving licence, tax ID,
+  full postal address, date of birth, or an ID-document upload).
+  * An email address or username is an ACCOUNT IDENTIFIER, never PII.
+    "Email or mobile number" as a single sign-in field is Credential Theft ONLY.
+  * A phone number alone is NOT sufficient.
+  * Do NOT label PIH because a page says "verify your identity", shows a
+    Terms/Privacy/Contact link, or because more fields might appear later.
+  * A plain email + password login form is Credential Theft ONLY.
+- Financial Fraud: card number, CVV, expiry, an amount to pay, or transfer /
+  wallet details are visible.
+- Malware Distribution: a download, install, update or run action is visible.
+- If the page looks legitimate, set is_phishing false and return an empty list.
+"""
 
 
 class AnnotatorAgent(VisionAgent):
@@ -254,7 +266,21 @@ Return JSON:
   "reasoning": "<2-3 sentences justifying the rulings>"
 }}
 
-Rule true only if you can point to a visible element that proves the intention."""
+Rule true only if you can point to a visible element that proves the intention.
+
+EVIDENCE STANDARD - applies to every ruling you make:
+- Rule a category TRUE only if a specific input field or UI element visible in
+  the image proves it. Never rule on inference.
+- Reject any claim whose justification contains "implies", "may", "likely",
+  "suggests", "could" or "probably" - that is not evidence.
+- Personal Information Harvesting specifically: an email address or username is
+  an ACCOUNT IDENTIFIER, not personal information. A plain email + password
+  login form is Credential Theft ONLY. Require two or more visible identity
+  fields (name, DOB, address, phone, postcode, occupation) or one strong
+  identifier (national ID, passport, licence, tax ID, ID-document upload).
+- Do not add a category that neither annotator proposed unless the image shows
+  unmistakable evidence for it.
+  """
 
 
 class TieBreakerAgent(VisionAgent):
@@ -370,7 +396,21 @@ Rules:
   plainly contradicts it.
 - Flag needs_human_review when the evidence is weak, the page is unreadable or
   the annotators conflicted badly.
-- Return at least one label for a phishing page; at most three."""
+- Return at least one label for a phishing page; at most three.
+
+
+EVIDENCE STANDARD - applies to every ruling you make:
+- Rule a category TRUE only if a specific input field or UI element visible in
+  the image proves it. Never rule on inference.
+- Reject any claim whose justification contains "implies", "may", "likely",
+  "suggests", "could" or "probably" - that is not evidence.
+- Personal Information Harvesting specifically: an email address or username is
+  an ACCOUNT IDENTIFIER, not personal information. A plain email + password
+  login form is Credential Theft ONLY. Require two or more visible identity
+  fields (name, DOB, address, phone, postcode, occupation) or one strong
+  identifier (national ID, passport, licence, tax ID, ID-document upload).
+- Do not add a category that neither annotator proposed unless the image shows
+  unmistakable evidence for it."""
 
 
 class FinalizerAgent(VisionAgent):

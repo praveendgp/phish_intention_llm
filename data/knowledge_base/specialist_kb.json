@@ -35,8 +35,12 @@
         "Domain in the screenshot unrelated to the brand whose login is displayed."
       ],
       "counter_indicators": [
-        "A real password manager or browser-native dialog rather than an in-page form.",
-        "A registration form that collects profile data but no authentication secret."
+        "An email address or username field used as the account identifier - this is Credential Theft, not PIH.",
+        "'Email or mobile number' offered as a single sign-in field.",
+        "A phone number as the only identity field.",
+        "Generic 'verify your identity' wording with no identity input fields visible.",
+        "Terms, Privacy or Contact links - these collect nothing on this page.",
+        "Speculation that more fields may appear on a later step."
       ]
     },
 
