@@ -1,4 +1,4 @@
-"""Manual annotation workbench - the human labelling protocol of the paper.
+"""✍️ Manual Annotation - the human labelling protocol of the paper.
 
 Two roles in one page:
   1. Label samples from scratch (two engineers + a reviewer).
@@ -17,10 +17,10 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from ui_components import (FULL_WIDTH, bar_chart, category_style, footer,
                            get_config, get_manual_manager, get_registry,
                            get_store, hero, render_label_chips, render_votes,
-                           setup_page, sidebar_status)
+                           sidebar_status, style_page)
 from phishintentionllm.schemas import Intention
 
-setup_page("Manual Annotation", "✍️")
+style_page()
 cfg = get_config()
 registry = get_registry()
 store = get_store()
@@ -141,10 +141,7 @@ with form_col:
                    else "Labellers disagree ❗ — reviewer decision required")
 
     existing_record = status["records"].get(annotator, {})
-    default = existing_record.get("categories")
-    if default is None and st.session_state.get("prefill_from_manifest"):
-        default = manifest_map.get(sample.sample_id, [])
-    default = default or []
+    default = existing_record.get("categories") or []
 
     st.markdown("**Intentions** (select one or more)")
     picked = []

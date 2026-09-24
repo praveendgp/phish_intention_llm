@@ -398,7 +398,6 @@ Rules:
   the annotators conflicted badly.
 - Return at least one label for a phishing page; at most three.
 
-
 EVIDENCE STANDARD - applies to every ruling you make:
 - Rule a category TRUE only if a specific input field or UI element visible in
   the image proves it. Never rule on inference.

@@ -1,4 +1,4 @@
-"""Inspect and query the dual-layer RAG knowledge architecture."""
+"""🧠 Knowledge Base - inspect and query the dual-layer RAG architecture."""
 
 from __future__ import annotations
 
@@ -9,12 +9,12 @@ import streamlit as st
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from ui_components import (category_style, footer, get_config, hero, setup_page,
-                           sidebar_status)
+from ui_components import (category_style, footer, get_config, hero,
+                           sidebar_status, style_page)
 from phishintentionllm.rag.knowledge_base import get_knowledge_base
 from phishintentionllm.rag.retriever import KnowledgeRetriever
 
-setup_page("Knowledge Base", "🧠")
+style_page()
 cfg = get_config()
 kb = get_knowledge_base()
 retriever = KnowledgeRetriever(cfg, kb)

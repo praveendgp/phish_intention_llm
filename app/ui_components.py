@@ -200,6 +200,14 @@ html, body, [class*="css"] { font-family: 'Inter', sans-serif; }
 """
 
 
+def style_page() -> None:
+    """Inject the shared CSS. Safe to call from any view.
+
+    Unlike `setup_page`, this does NOT call `st.set_page_config` - that belongs
+    to the navigation entry point only, and calling it twice raises.
+    """
+    st.markdown(CSS, unsafe_allow_html=True)
+
 # ---------------------------------------------------------------------------
 def setup_page(title: str, icon: str = "🎣", layout: str = "wide") -> None:
     st.set_page_config(page_title=f"{title} | PhishIntentionLLM", page_icon=icon,
