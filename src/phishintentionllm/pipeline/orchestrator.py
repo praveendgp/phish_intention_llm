@@ -1,21 +1,4 @@
-"""PhishIntentionLLM orchestrator - the algorithm of Fig. 3 in the base paper.
-
-    function PHISHINTENTIONLLM(I, K_B, K_C, tau)
-        Layer 1  E            <- VISIONANALYSISAGENT(I)
-        Layer 2  E_enriched   <- CONTEXTENRICHMENTAGENT(E, RETRIEVEPATTERNS(K_B))
-        Layer 3  C, S         <- CLASSIFICATIONAGENT(E_enriched, features)
-                 P            <- {c in C | Top-k(S, k=3)}
-        Layer 4  A            <- U_{c in P} SPECIALISTAGENT(E_enriched, K_c, c)
-        Layer 5  R, conf      <- VALIDATIONAGENT(E, E_enriched, C, S, A)
-                 if conf < tau: widen to categories \\ P and re-validate
-                 T            <- {(t, evidence, confidence) | confidence >= tau}
-                 if |T| = 0  : T <- {argmax_t confidence(t)}
-        return T
-
-Every layer receives the screenshot `I` itself: the image is encoded once per
-sample and handed to each vision agent, so no layer reasons over a text-only
-description of the page.
-"""
+"""PhishIntentionLLM orchestrator - Fig. 3 of the base paper."""
 
 from __future__ import annotations
 
@@ -41,11 +24,7 @@ StepCallback = Optional[Callable[[AgentStep], None]]
 
 
 class PhishIntentionLLM:
-    """Multi-agent RAG framework for phishing intention detection.
-
-    This is the system under evaluation. It never reads the manifest, so its
-    predictions remain independent of the reference labels.
-    """
+    """Multi-agent RAG framework for phishing intention detection."""
 
     def __init__(self, config: Optional[Config] = None,
                  client: Optional[OllamaClient] = None):
@@ -65,7 +44,6 @@ class PhishIntentionLLM:
         self.feedback_enabled = bool(
             self.cfg.get("framework.enable_feedback_loop", True))
 
-    # ------------------------------------------------------------------
     def analyse_sample(self, sample: Sample,
                        on_step: StepCallback = None) -> AnalysisResult:
         result = self.analyse_screenshot(
@@ -74,7 +52,6 @@ class PhishIntentionLLM:
         result.is_phishing = result.is_phishing and sample.is_phishing
         return result
 
-    # ------------------------------------------------------------------
     def analyse_screenshot(
         self,
         image_path: str,
@@ -101,67 +78,73 @@ class PhishIntentionLLM:
                                 source=source, screenshot_path=str(image_path),
                                 steps=steps)
 
-        # The screenshot is encoded ONCE and shared by every vision agent.
         try:
             image_b64 = load_image_b64(image_path, self.max_edge)
         except Exception as exc:
             step = emit(AgentStep("Image Loader", "Layer 0 - Input", "local"))
             step.fail(str(exc))
+            touch(step)
             result.error = f"Cannot read screenshot: {exc}"
             result.elapsed = round(time.time() - started, 2)
             return result
 
         try:
-            # ---------- Layer 1: Vision Analysis ----------------------
+            # Layer 1: Vision Analysis
             step = emit(self.vision_agent.new_step())
+            step.start()
+            touch(step)
             elements = self.vision_agent.analyse(image_b64, step, brand_hint)
             touch(step)
 
-            # ---------- Layer 2: Context Enrichment -------------------
+            # Layer 2: Context Enrichment
             step = emit(self.context_agent.new_step())
+            step.start()
+            touch(step)
             context = self.context_agent.enrich(elements, image_b64, step)
             touch(step)
 
-            # ---------- Layer 3: Classification -----------------------
+            # Layer 3: Classification
             step = emit(self.classification_agent.new_step())
+            step.start()
+            touch(step)
             candidates, all_scores, cmeta = self.classification_agent.classify(
                 image_b64, context, step)
             touch(step)
             result.category_scores = all_scores
 
-            # ---------- Layer 4: Specialist Analysis ------------------
+            # Layer 4: Specialist Analysis
             findings = self._run_specialists(
                 [c.category for c in candidates], context, image_b64, emit, touch)
 
-            # ---------- Layer 5: Validation & Synthesis ---------------
+            # Layer 5: Validation & Synthesis
             step = emit(self.validation_agent.new_step())
+            step.start()
+            touch(step)
             intentions, vmeta = self.validation_agent.validate(
                 context, candidates, all_scores, findings, image_b64, step)
             touch(step)
 
-            # ---------- Feedback loop (conf < tau) --------------------
+            # Feedback loop
             if (self.feedback_enabled
                     and vmeta.get("overall_confidence", 0.0) < self.tau):
                 remaining = [c for c in self.specialists.all_categories()
                              if c not in {f.category for f in findings}]
                 if remaining:
                     result.feedback_loop_used = True
-                    log.info("Confidence %.2f < tau %.2f - widening to %s",
-                             vmeta.get("overall_confidence", 0.0), self.tau, remaining)
                     findings += self._run_specialists(
                         remaining, context, image_b64, emit, touch,
                         note="feedback loop")
                     step = emit(self.validation_agent.new_step())
                     step.agent = "Validation & Synthesis Agent (re-run)"
+                    step.start()
+                    touch(step)
                     intentions, vmeta = self.validation_agent.validate(
                         context, candidates, all_scores, findings, image_b64, step)
                     touch(step)
 
-            # ---------- Result formatting -----------------------------
             result.intentions = self._format_results(intentions, findings)
             result.specialist_findings = findings
             result.sector = self.vision_agent._normalise_sector(vmeta.get("sector") or elements.sector)
-
             result.overall_confidence = vmeta.get("overall_confidence", 0.0)
             result.is_phishing = bool(vmeta.get("is_phishing", True))
             result.phishing_score = vmeta.get("phishing_score", 0.0)
@@ -169,7 +152,7 @@ class PhishIntentionLLM:
             result.risk_summary = vmeta.get("risk_summary", "")
             result.recommended_action = vmeta.get("recommended_action", "")
 
-        except Exception as exc:  # pragma: no cover - defensive
+        except Exception as exc:
             log.exception("Pipeline failed for %s", image_path)
             result.error = f"{type(exc).__name__}: {exc}"
 
@@ -177,7 +160,6 @@ class PhishIntentionLLM:
         result.elapsed = round(time.time() - started, 2)
         return result
 
-    # ------------------------------------------------------------------
     def _run_specialists(self, categories: List[str], context, image_b64: str,
                          emit, touch, note: str = "") -> List[SpecialistFinding]:
         findings: List[SpecialistFinding] = []
@@ -186,13 +168,14 @@ class PhishIntentionLLM:
             step = emit(agent.new_step())
             if note:
                 step.layer = f"{step.layer} ({note})"
+            step.start()
+            touch(step)
             try:
                 findings.append(agent.analyse(context, image_b64, step))
             except Exception as exc:
                 step.fail(str(exc))
             touch(step)
 
-        # Show the complete four-expert panel in the UI by recording skips.
         if not note:
             for category in self.specialists.all_categories():
                 if category in categories:
@@ -202,10 +185,8 @@ class PhishIntentionLLM:
                 touch(step)
         return findings
 
-    # ------------------------------------------------------------------
     def _format_results(self, intentions: List[IntentionResult],
                         findings: List[SpecialistFinding]) -> List[IntentionResult]:
-        """T <- {(t, evidence, conf) | conf >= tau}; ensure |T| >= 1."""
         kept = [i for i in intentions if i.confidence >= self.tau]
         if kept:
             return kept
@@ -219,9 +200,7 @@ class PhishIntentionLLM:
         return [IntentionResult(Intention.CREDENTIAL_THEFT.value, 0.0, [],
                                 "No intention could be established from this screenshot.")]
 
-    # ------------------------------------------------------------------
     def preflight(self) -> Dict[str, object]:
-        """Verify Ollama, that every model is pulled and that all are multimodal."""
         report: Dict[str, object] = {"host": self.client.host, "alive": False,
                                      "models": {}, "missing": [],
                                      "non_vision": []}

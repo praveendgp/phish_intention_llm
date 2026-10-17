@@ -1,9 +1,4 @@
-"""Single-agent baseline (Section 6.2 of the base paper).
-
-One monolithic VLM prompt, one model, no RAG, no specialists, no multi-layer
-reasoning. Used to quantify the gain contributed by the multi-agent RAG
-architecture. It is scored against the same manifest as the full framework.
-"""
+"""Single-agent baseline (Section 6.2 of the base paper)."""
 
 from __future__ import annotations
 
@@ -53,13 +48,14 @@ class SingleAgentBaseline:
         step = AgentStep(agent="Single-Agent Baseline", layer="Baseline",
                          model=self.spec.label or self.spec.model, vision=True)
         steps = [step]
+        
+        step.start()
         if on_step:
             on_step(step)
 
         result = AnalysisResult(sample_id=sample_id or str(image_path),
                                 source=source, screenshot_path=str(image_path),
                                 steps=steps)
-        step.start()
         try:
             image_b64 = load_image_b64(image_path, self.max_edge)
             response = self.client.generate(self.spec, PROMPT, system=SYSTEM,
@@ -97,6 +93,9 @@ class SingleAgentBaseline:
             log.error("Single-agent baseline failed: %s", exc)
             step.fail(str(exc))
             result.error = str(exc)
+
+        if on_step:
+            on_step(step)
 
         result.elapsed = round(time.time() - started, 2)
         return result
