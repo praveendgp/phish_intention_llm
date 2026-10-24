@@ -234,3 +234,28 @@ ui:
   page_title: "PhishIntentionLLM"
   show_agent_trace: true
   show_raw_json: true
+
+
+# ---------------------------------------------------------------------
+# Clerk Authentication and Subscription Configuration (MTech Novelty)
+# ---------------------------------------------------------------------
+clerk:
+  frontend_api: "https://your-app-clerk.accounts.dev"
+  publishable_key: "pk_test_XXXXXXXXXXXXXXXXXXXXXXXXXXXXXX"
+  secret_key: "sk_test_YYYYYYYYYYYYYYYYYYYYYYYYYYYYYY"
+  oauth_providers:
+    - google
+    - github
+
+subscription:
+  plans:
+    free:
+      name: "Free Community Tier"
+      can_upload: false
+      can_execute_pipeline: false
+      can_view_historical: true
+    premium:
+      name: "Premium Security Analyst"
+      can_upload: true
+      can_execute_pipeline: true
+      can_view_historical: true

@@ -72,6 +72,23 @@ class AnnotationStore:
     def load_manifest(self) -> List[ManifestRecord]:
         return [ManifestRecord.from_dict(r) for r in self.load_manifest_rows()]
 
+    def list_samples(self, limit: int = 50) -> List[Dict[str, Any]]:
+        """Returns benchmark manifest samples for UI inspection."""
+        rows = self.load_manifest_rows()
+        samples: List[Dict[str, Any]] = []
+        for r in rows[:limit]:
+            samples.append({
+                "id": r.get("sample_id", "sample"),
+                "sample_id": r.get("sample_id", "sample"),
+                "brand": r.get("brand") or "Unknown",
+                "source": r.get("source") or "manifest",
+                "image_path": r.get("screenshot_path", ""),
+                "screenshot_path": r.get("screenshot_path", ""),
+                "labels": r.get("labels", []),
+                "ground_truth_intention": ", ".join(r.get("labels", [])) if r.get("labels") else "unlabeled",
+            })
+        return samples
+
     def manifest_map(self) -> Dict[str, List[str]]:
         """sample_id -> reference labels. This is what evaluation compares against."""
         return {r["sample_id"]: r.get("labels", [])
