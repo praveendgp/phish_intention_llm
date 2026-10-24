@@ -28,7 +28,7 @@ st.set_page_config(
 
 cfg = load_config("config.yaml")
 
-# 1. Initialize auth session keys & check for incoming Clerk OAuth redirect callbacks (?clerk_sync=1)
+# 1. Initialize auth session keys & check for incoming Clerk OAuth redirect callbacks (?clerk_sync=<timestamp>)
 init_clerk_auth(cfg)
 check_realtime_clerk_callback(cfg)
 

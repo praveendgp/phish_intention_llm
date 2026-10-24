@@ -247,6 +247,55 @@ def update_clerk_user_tier(user_id: str, sec_key: str, new_tier: str = "premium"
     return False
 
 
+def revoke_clerk_user_sessions(user_id: str, sec_key: str) -> int:
+    """Revoke all active sessions for this user in Clerk Cloud REST API.
+    
+    This ensures that upon subsequent re-login, Clerk will NOT silently reuse
+    the previous session and will force the user to re-authenticate.
+    """
+    if not user_id or not sec_key:
+        return 0
+
+    revoked_count = 0
+    try:
+        url = f"{CLERK_API_BASE}/sessions?user_id={user_id}&status=active"
+        req = urllib.request.Request(
+            url,
+            headers={
+                "Authorization": f"Bearer {sec_key}",
+                "Content-Type": "application/json",
+                "User-Agent": "PhishIntentionLLM-Auth/1.0"
+            }
+        )
+        with urllib.request.urlopen(req, timeout=8) as response:
+            if response.status == 200:
+                sessions = json.loads(response.read().decode("utf-8"))
+                if isinstance(sessions, list):
+                    for sess in sessions:
+                        sess_id = sess.get("id")
+                        if sess_id:
+                            rev_url = f"{CLERK_API_BASE}/sessions/{sess_id}/revoke"
+                            rev_req = urllib.request.Request(
+                                rev_url,
+                                data=b"{}",
+                                method="POST",
+                                headers={
+                                    "Authorization": f"Bearer {sec_key}",
+                                    "Content-Type": "application/json",
+                                    "User-Agent": "PhishIntentionLLM-Auth/1.0"
+                                }
+                            )
+                            try:
+                                with urllib.request.urlopen(rev_req, timeout=5):
+                                    revoked_count += 1
+                            except Exception:
+                                pass
+    except Exception as exc:
+        print(f"[Clerk API] Notice during session revocation: {exc}")
+
+    return revoked_count
+
+
 def set_active_user_from_clerk_data(user_data: Dict[str, Any], session_token: Optional[str] = None) -> None:
     """Populate Streamlit session_state with verified Clerk user profile data."""
     st.session_state["authenticated"] = True
@@ -282,8 +331,8 @@ def set_active_user_from_clerk_data(user_data: Dict[str, Any], session_token: Op
 def check_realtime_clerk_callback(cfg: Any = None) -> None:
     """Checks Streamlit query parameters for incoming Clerk OAuth session callbacks.
     
-    Authenticates automatically ONLY when a valid callback is present in the URL:
-      - ?clerk_sync=1 (automatically added to the OAuth redirect URL)
+    Authenticates automatically ONLY when a fresh redirect callback is present:
+      - ?clerk_sync=<timestamp> (automatically attached to the OAuth return URL)
       - ?user_id=... (direct user callback)
     
     NEVER restores session automatically if user clicked Sign Out or on fresh page visits.
@@ -294,15 +343,16 @@ def check_realtime_clerk_callback(cfg: Any = None) -> None:
     params = getattr(st, "query_params", {})
     user_id = params.get("user_id") or params.get("sub")
     session_token = params.get("session_token") or params.get("token")
-    is_clerk_sync = params.get("clerk_sync") in ["1", "true", "True"]
+    clerk_sync_val = params.get("clerk_sync")
+    is_clerk_sync = bool(clerk_sync_val)
 
     # If the user previously logged out in this session, do not auto-login unless
-    # they explicitly came back from a new Clerk OAuth redirect (clerk_sync=1 or user_id)
+    # they explicitly came back from a new Clerk OAuth redirect (clerk_sync or user_id)
     if st.session_state.get("logged_out", False) and not (is_clerk_sync or user_id):
         return
 
     # If neither clerk_sync nor user_id is in query parameters, do NOT auto-login.
-    # This prevents ghost sessions when refreshing or opening a new tab.
+    # This prevents ghost sessions when refreshing, closing, or reopening a tab.
     if not (is_clerk_sync or user_id):
         return
 
@@ -327,7 +377,7 @@ def check_realtime_clerk_callback(cfg: Any = None) -> None:
             st.rerun()
             return
 
-    # 2. Automated sync on return from Google / GitHub Clerk redirect (?clerk_sync=1)
+    # 2. Automated sync on return from Google / GitHub Clerk redirect (?clerk_sync=<timestamp>)
     if is_clerk_sync:
         latest = fetch_latest_signed_in_user(sec_key)
         if latest:
@@ -340,8 +390,23 @@ def check_realtime_clerk_callback(cfg: Any = None) -> None:
             return
 
 
-def logout_user() -> None:
-    """Completely clear session authentication state and prevent instant re-login."""
+def logout_user(cfg: Any = None) -> None:
+    """Completely clear session authentication state and revoke Clerk Cloud sessions.
+    
+    Ensures re-login forces a fresh login and cannot reuse the previous session.
+    """
+    user_id = st.session_state.get("user_id")
+    clerk_conf = get_clerk_config(cfg)
+    sec_key = clerk_conf.get("secret_key", "")
+
+    # 1. Revoke active session on Clerk Cloud so Clerk won't auto-approve next sign-in
+    if user_id and sec_key:
+        try:
+            revoke_clerk_user_sessions(user_id, sec_key)
+        except Exception:
+            pass
+
+    # 2. Clear all Streamlit session state
     keys_to_clear = [
         "authenticated",
         "user_id",
@@ -360,6 +425,7 @@ def logout_user() -> None:
     st.session_state["tier"] = "free"
     st.session_state["logged_out"] = True
 
+    # 3. Clear query parameters
     try:
         st.query_params.clear()
     except Exception:
@@ -425,8 +491,9 @@ def render_clerk_auth_sidebar(cfg: Any = None) -> None:
                 st.markdown(f"[⚙️ Manage Clerk Profile / Switch Account]({portal_user_url})")
 
             st.divider()
-            if st.button("🚪 Sign Out", type="secondary", use_container_width=True):
-                logout_user()
+            if st.button("🚪 Sign Out", key="sidebar_signout", type="secondary", use_container_width=True):
+                with st.spinner("Signing out and revoking session..."):
+                    logout_user(cfg)
                 st.rerun()
         else:
             st.warning("Not Signed In")
@@ -435,15 +502,19 @@ def render_clerk_auth_sidebar(cfg: Any = None) -> None:
 
 
 def render_clerk_login_gate(cfg: Any = None) -> None:
-    """Renders the automated single-click social login gate on the main dashboard."""
+    """Renders the automated single-click social login gate on the main dashboard.
+    
+    100% automated: No manual sync buttons. Redirects cleanly and syncs automatically.
+    """
     clerk_conf = get_clerk_config(cfg)
     pub_key = clerk_conf["publishable_key"]
     sec_key = clerk_conf["secret_key"]
     portal_url = clerk_conf["portal_sign_in_url"]
     app_url = os.getenv("STREAMLIT_APP_URL", "http://localhost:8501").rstrip("/")
 
-    # Automatic sync parameter attached to redirect_url
-    redirect_target = f"{app_url}/?clerk_sync=1"
+    # Fresh timestamp parameter prevents browser caching and ensures clean re-login
+    ts = int(time.time())
+    redirect_target = f"{app_url}/?clerk_sync={ts}"
     sign_in_url = f"{portal_url}?redirect_url={urllib.parse.quote(redirect_target, safe='')}"
 
     st.markdown("# 🎣 PhishIntentionLLM")
@@ -505,17 +576,17 @@ def render_clerk_login_gate(cfg: Any = None) -> None:
     st.markdown("### 🔑 Instant Social Login")
     st.caption("Authenticate with Google or GitHub via Clerk. Once completed, your session will sync and log in automatically.")
 
-    col_btn, col_sync = st.columns([1.6, 1])
-    with col_btn:
-        st.markdown(
-            f'''
+    # Clean, single action button — Manual sync button completely removed!
+    st.markdown(
+        f'''
+        <div style="max-width: 480px; margin: 16px 0;">
             <a href="{sign_in_url}" target="_self" style="
                 display: block;
                 width: 100%;
                 text-align: center;
                 background: linear-gradient(135deg, #4f46e5 0%, #3b82f6 100%);
                 color: #ffffff !important;
-                padding: 12px 24px;
+                padding: 14px 28px;
                 border-radius: 8px;
                 text-decoration: none;
                 font-weight: 600;
@@ -524,20 +595,10 @@ def render_clerk_login_gate(cfg: Any = None) -> None:
             ">
                 🌐 Sign in with Google / GitHub
             </a>
-            ''',
-            unsafe_allow_html=True
-        )
-
-    with col_sync:
-        if st.button("🔄 Manual Sync (If completed elsewhere)", type="secondary", use_container_width=True):
-            with st.spinner("Syncing latest session from Clerk Cloud API..."):
-                latest_user = fetch_latest_signed_in_user(sec_key)
-                if latest_user:
-                    set_active_user_from_clerk_data(latest_user)
-                    st.success(f"Logged in as {st.session_state.get('name')}!")
-                    st.rerun()
-                else:
-                    st.error("No active Clerk sign-in detected yet.")
+        </div>
+        ''',
+        unsafe_allow_html=True
+    )
 
     st.markdown("---")
     st.markdown("#### 👥 Or Select An Existing Account in Your Clerk Tenant:")
