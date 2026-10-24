@@ -1,8 +1,6 @@
-"""
-Real-Time Clerk Authentication & Subscription Management for PhishIntentionLLM.
+"""Real-Time Clerk Authentication & Subscription Management for PhishIntentionLLM.
 Directly communicates with Clerk Cloud REST API (api.clerk.com/v1).
 """
-
 from __future__ import annotations
 
 import os
@@ -11,10 +9,11 @@ import json
 import base64
 import urllib.request
 import urllib.error
+import urllib.parse
 from typing import Dict, Any, Optional, List
+from pathlib import Path
 
 import streamlit as st
-import streamlit.components.v1 as components
 
 CLERK_API_BASE = "https://api.clerk.com/v1"
 
@@ -28,7 +27,6 @@ def decode_clerk_domain(pub_key: str) -> Optional[str]:
         clean = clean[len("pk_test_"):]
     elif clean.startswith("pk_live_"):
         clean = clean[len("pk_live_"):]
-
     padding = "=" * ((4 - len(clean) % 4) % 4)
     try:
         decoded = base64.b64decode(clean + padding).decode("utf-8").strip()
@@ -55,17 +53,14 @@ def get_clerk_urls(pub_key: str, frontend_api_input: str = "") -> Dict[str, str]
         clean = fapi.replace("https://", "").replace("http://", "").rstrip("/")
         if ".clerk.accounts.dev" in clean:
             portal_host = clean.replace(".clerk.accounts.dev", ".accounts.dev")
-            portal_sign_in = f"https://{portal_host}/sign-in"
-            portal_sign_up = f"https://{portal_host}/sign-up"
-            portal_user_profile = f"https://{portal_host}/user"
         elif ".accounts.dev" in clean:
-            portal_sign_in = f"https://{clean}/sign-in"
-            portal_sign_up = f"https://{clean}/sign-up"
-            portal_user_profile = f"https://{clean}/user"
+            portal_host = clean
         else:
-            portal_sign_in = f"{fapi}/sign-in"
-            portal_sign_up = f"{fapi}/sign-up"
-            portal_user_profile = f"{fapi}/user"
+            portal_host = clean
+
+        portal_sign_in = f"https://{portal_host}/sign-in"
+        portal_sign_up = f"https://{portal_host}/sign-up"
+        portal_user_profile = f"https://{portal_host}/user"
 
     return {
         "frontend_api": fapi,
@@ -76,7 +71,7 @@ def get_clerk_urls(pub_key: str, frontend_api_input: str = "") -> Dict[str, str]
 
 
 def get_clerk_config(cfg: Any = None) -> Dict[str, str]:
-    """Retrieve Clerk keys and URLs from session_state, environment, or config.yaml."""
+    """Retrieve Clerk keys and URLs from session_state, local persistence, env, or config.yaml."""
     pub_key = (
         st.session_state.get("custom_clerk_pub_key")
         or os.getenv("CLERK_PUBLISHABLE_KEY", "")
@@ -90,6 +85,22 @@ def get_clerk_config(cfg: Any = None) -> Dict[str, str]:
         or os.getenv("CLERK_FRONTEND_API", "")
     )
 
+    # 1. Check local credentials cache (.clerk_credentials.json)
+    cred_file = Path(".clerk_credentials.json")
+    if cred_file.exists() and (not pub_key or not sec_key):
+        try:
+            with open(cred_file, "r", encoding="utf-8") as f:
+                stored = json.load(f)
+                if not pub_key:
+                    pub_key = stored.get("publishable_key", "")
+                if not sec_key:
+                    sec_key = stored.get("secret_key", "")
+                if not fapi_in:
+                    fapi_in = stored.get("frontend_api", "")
+        except Exception:
+            pass
+
+    # 2. Check config.yaml
     if cfg:
         try:
             clerk_sec = cfg.get("clerk", {})
@@ -117,6 +128,7 @@ def init_clerk_auth(cfg: Any = None) -> None:
     """Initialize Clerk authentication session state keys."""
     defaults = {
         "authenticated": False,
+        "logged_out": False,
         "user_id": None,
         "email": None,
         "name": None,
@@ -238,6 +250,7 @@ def update_clerk_user_tier(user_id: str, sec_key: str, new_tier: str = "premium"
 def set_active_user_from_clerk_data(user_data: Dict[str, Any], session_token: Optional[str] = None) -> None:
     """Populate Streamlit session_state with verified Clerk user profile data."""
     st.session_state["authenticated"] = True
+    st.session_state["logged_out"] = False
     st.session_state["user_id"] = user_data.get("id")
 
     emails = user_data.get("email_addresses", [])
@@ -248,7 +261,6 @@ def set_active_user_from_clerk_data(user_data: Dict[str, Any], session_token: Op
     last = user_data.get("last_name") or ""
     name = f"{first} {last}".strip() or primary_email.split("@")[0].title()
     st.session_state["name"] = name
-
     st.session_state["avatar_url"] = user_data.get("image_url") or "https://api.dicebear.com/7.x/bottts/svg?seed=clerk"
 
     accounts = user_data.get("external_accounts", [])
@@ -268,23 +280,38 @@ def set_active_user_from_clerk_data(user_data: Dict[str, Any], session_token: Op
 
 
 def check_realtime_clerk_callback(cfg: Any = None) -> None:
-    """
-    Checks Streamlit query parameters and recent Clerk sign-in activity.
-    If a Google/GitHub user just signed in within 5 minutes, auto-authenticates them.
+    """Checks Streamlit query parameters for incoming Clerk OAuth session callbacks.
+    
+    Authenticates automatically ONLY when a valid callback is present in the URL:
+      - ?clerk_sync=1 (automatically added to the OAuth redirect URL)
+      - ?user_id=... (direct user callback)
+    
+    NEVER restores session automatically if user clicked Sign Out or on fresh page visits.
     """
     if st.session_state.get("authenticated", False):
         return
 
     params = getattr(st, "query_params", {})
+    user_id = params.get("user_id") or params.get("sub")
+    session_token = params.get("session_token") or params.get("token")
+    is_clerk_sync = params.get("clerk_sync") in ["1", "true", "True"]
+
+    # If the user previously logged out in this session, do not auto-login unless
+    # they explicitly came back from a new Clerk OAuth redirect (clerk_sync=1 or user_id)
+    if st.session_state.get("logged_out", False) and not (is_clerk_sync or user_id):
+        return
+
+    # If neither clerk_sync nor user_id is in query parameters, do NOT auto-login.
+    # This prevents ghost sessions when refreshing or opening a new tab.
+    if not (is_clerk_sync or user_id):
+        return
+
     clerk_conf = get_clerk_config(cfg)
-    sec_key = clerk_conf["secret_key"]
+    sec_key = clerk_conf.get("secret_key", "")
     if not sec_key:
         return
 
-    user_id = params.get("user_id") or params.get("sub")
-    session_token = params.get("session_token") or params.get("token")
-
-    # 1. Direct query parameter handshake
+    # 1. Direct user_id callback
     if user_id:
         user_data = fetch_clerk_user_profile(user_id, sec_key)
         if user_data:
@@ -293,44 +320,61 @@ def check_realtime_clerk_callback(cfg: Any = None) -> None:
                 del st.query_params["user_id"]
             except Exception:
                 pass
+            try:
+                del st.query_params["clerk_sync"]
+            except Exception:
+                pass
+            st.rerun()
             return
 
-    # 2. Automated recent sign-in detector:
-    # If a user completed Google/GitHub auth in Clerk within the last 5 minutes (300,000 ms),
-    # auto-activate session so they are not bounced back to sign-in page!
-    try:
+    # 2. Automated sync on return from Google / GitHub Clerk redirect (?clerk_sync=1)
+    if is_clerk_sync:
         latest = fetch_latest_signed_in_user(sec_key)
-        if latest and latest.get("last_sign_in_at"):
-            now_ms = time.time() * 1000
-            diff_ms = now_ms - latest["last_sign_in_at"]
-            if 0 <= diff_ms < 300_000:  # within 5 minutes
-                set_active_user_from_clerk_data(latest)
-    except Exception:
-        pass
+        if latest:
+            set_active_user_from_clerk_data(latest, session_token)
+            try:
+                del st.query_params["clerk_sync"]
+            except Exception:
+                pass
+            st.rerun()
+            return
 
 
 def logout_user() -> None:
-    """Clear session authentication state."""
+    """Completely clear session authentication state and prevent instant re-login."""
+    keys_to_clear = [
+        "authenticated",
+        "user_id",
+        "email",
+        "name",
+        "avatar_url",
+        "provider",
+        "tier",
+        "session_token",
+        "last_result",
+    ]
+    for k in keys_to_clear:
+        st.session_state[k] = None
+
     st.session_state["authenticated"] = False
-    st.session_state["user_id"] = None
-    st.session_state["email"] = None
-    st.session_state["name"] = None
-    st.session_state["avatar_url"] = None
-    st.session_state["provider"] = None
     st.session_state["tier"] = "free"
-    st.session_state["session_token"] = None
+    st.session_state["logged_out"] = True
+
+    try:
+        st.query_params.clear()
+    except Exception:
+        pass
 
 
 def render_clerk_auth_sidebar(cfg: Any = None) -> None:
     """Renders authentication & subscription status in Streamlit sidebar."""
     clerk_conf = get_clerk_config(cfg)
-    sec_key = clerk_conf["secret_key"]
-    portal_user_url = clerk_conf["portal_user_profile_url"]
+    sec_key = clerk_conf.get("secret_key", "")
+    portal_user_url = clerk_conf.get("portal_user_profile_url", "")
     is_auth = st.session_state.get("authenticated", False)
 
     with st.sidebar:
         st.markdown("### 🔐 Identity & Access")
-
         if is_auth:
             tier = st.session_state.get("tier", "free")
             name = st.session_state.get("name", "Researcher")
@@ -342,6 +386,8 @@ def render_clerk_auth_sidebar(cfg: Any = None) -> None:
             with col_a:
                 if avatar:
                     st.image(avatar, width=54)
+                else:
+                    st.markdown("## 👤")
             with col_b:
                 st.markdown(f"**{name}**")
                 st.caption(f"{email}")
@@ -374,53 +420,80 @@ def render_clerk_auth_sidebar(cfg: Any = None) -> None:
                         st.session_state["tier"] = "premium"
                     st.rerun()
 
-            st.markdown(f"Provider: `{provider}`")
+            st.caption(f"Connected via: `{provider}`")
             if portal_user_url:
-                st.markdown(f"[Manage Clerk Account]({portal_user_url})", unsafe_allow_html=True)
+                st.markdown(f"[⚙️ Manage Clerk Profile / Switch Account]({portal_user_url})")
 
-            if st.button("Sign Out", type="secondary", use_container_width=True):
+            st.divider()
+            if st.button("🚪 Sign Out", type="secondary", use_container_width=True):
                 logout_user()
                 st.rerun()
         else:
             st.warning("Not Signed In")
             st.caption("Sign in with Google or GitHub to access research tools.")
+        st.divider()
 
 
 def render_clerk_login_gate(cfg: Any = None) -> None:
-    """Renders the login gate on the main dashboard."""
+    """Renders the automated single-click social login gate on the main dashboard."""
     clerk_conf = get_clerk_config(cfg)
     pub_key = clerk_conf["publishable_key"]
     sec_key = clerk_conf["secret_key"]
     portal_url = clerk_conf["portal_sign_in_url"]
-    fapi_url = clerk_conf["frontend_api"]
-    app_url = os.getenv("STREAMLIT_APP_URL", "http://localhost:8501")
+    app_url = os.getenv("STREAMLIT_APP_URL", "http://localhost:8501").rstrip("/")
+
+    # Automatic sync parameter attached to redirect_url
+    redirect_target = f"{app_url}/?clerk_sync=1"
+    sign_in_url = f"{portal_url}?redirect_url={urllib.parse.quote(redirect_target, safe='')}"
 
     st.markdown("# 🎣 PhishIntentionLLM")
     st.markdown("### Multi-Agent Retrieval-Augmented Generation for Phishing Intention Analysis")
     st.caption("Li, Manickam, Chong & Karuppayah — Accepted by ICDF2C 2025 (USM Cybersecurity Lab)")
 
     st.info("""
-    **Novelty: Real-Time Clerk Social Login & Subscription RBAC**
+    **Real-Time Clerk Social Login & Subscription RBAC**
     - 🔒 All researchers and analysts must sign in with verified **Google** or **GitHub** credentials via Clerk.
     - 🆓 **Free Community Tier**: Inspect pre-computed verified evaluation cases from the threat archive.
     - 💎 **Premium Subscribers**: Execute live Single-Agent and 5-Layer Multi-Agent RAG pipelines on new screenshots.
     """)
 
-    # Keys Setup Expander
-    has_valid_keys = bool(pub_key and sec_key and not "XXXX" in pub_key and not "YYYY" in sec_key)
+    has_valid_keys = bool(
+        pub_key and sec_key 
+        and not "XXXX" in pub_key 
+        and not "YYYY" in sec_key
+        and not "your-app-clerk" in pub_key
+    )
+
     with st.expander("🛠️ Clerk Cloud Credentials Setup", expanded=not has_valid_keys):
         st.markdown("Enter your Clerk API keys from [dashboard.clerk.com](https://dashboard.clerk.com/) -> **API Keys**:")
         col_k1, col_k2 = st.columns(2)
         with col_k1:
-            input_pub = st.text_input("Clerk Publishable Key (`pk_test_...`)", value=pub_key if not "XXXX" in pub_key else "", key="input_pub_key")
+            input_pub = st.text_input(
+                "Clerk Publishable Key (`pk_test_...`)", 
+                value=pub_key if not "XXXX" in pub_key else "", 
+                key="input_pub_key"
+            )
         with col_k2:
-            input_sec = st.text_input("Clerk Secret Key (`sk_test_...`)", type="password", value=sec_key if not "YYYY" in sec_key else "", key="input_sec_key")
+            input_sec = st.text_input(
+                "Clerk Secret Key (`sk_test_...`)", 
+                type="password", 
+                value=sec_key if not "YYYY" in sec_key else "", 
+                key="input_sec_key"
+            )
         if st.button("💾 Save Credentials", type="primary"):
             if input_pub:
                 st.session_state["custom_clerk_pub_key"] = input_pub.strip()
             if input_sec:
                 st.session_state["custom_clerk_sec_key"] = input_sec.strip()
-            st.success("Credentials saved!")
+            try:
+                with open(".clerk_credentials.json", "w", encoding="utf-8") as f:
+                    json.dump({
+                        "publishable_key": (input_pub or pub_key).strip(),
+                        "secret_key": (input_sec or sec_key).strip(),
+                    }, f, indent=2)
+            except Exception:
+                pass
+            st.success("Credentials saved and persisted across sessions!")
             st.rerun()
 
     if not has_valid_keys:
@@ -429,56 +502,45 @@ def render_clerk_login_gate(cfg: Any = None) -> None:
 
     st.markdown("---")
 
-    # Automated background client handshake via Clerk JS
-    if pub_key and fapi_url:
-        js_code = f"""
-        <script async crossorigin="anonymous"
-          data-clerk-publishable-key="{pub_key}"
-          src="{fapi_url}/npm/@clerk/clerk-js@latest/dist/clerk.browser.js"
-          type="text/javascript"></script>
-        <script>
-          window.addEventListener("load", async function() {{
-            try {{
-              if (!window.Clerk) return;
-              await window.Clerk.load();
-              if (window.Clerk.user) {{
-                const uid = window.Clerk.user.id;
-                const topLoc = window.top.location;
-                if (!topLoc.search.includes("user_id=")) {{
-                  topLoc.href = "{app_url}/?user_id=" + encodeURIComponent(uid);
-                }}
-              }}
-            }} catch(e) {{}}
-          }});
-        </script>
-        """
-        components.html(js_code, height=0, width=0)
+    st.markdown("### 🔑 Instant Social Login")
+    st.caption("Authenticate with Google or GitHub via Clerk. Once completed, your session will sync and log in automatically.")
 
-    # Main 2-Step Login Section
-    st.markdown("### 🔑 Instant Social Login & Session Sync")
-    st.caption("Sign in with Google or GitHub on Clerk, then sync your active session directly to Streamlit.")
-
-    col_s1, col_s2 = st.columns([1.3, 1])
-    with col_s1:
-        st.link_button(
-            "🌐 Step 1: Sign in with Google / GitHub",
-            f"{portal_url}?redirect_url={app_url}/",
-            type="primary",
-            use_container_width=True
+    col_btn, col_sync = st.columns([1.6, 1])
+    with col_btn:
+        st.markdown(
+            f'''
+            <a href="{sign_in_url}" target="_self" style="
+                display: block;
+                width: 100%;
+                text-align: center;
+                background: linear-gradient(135deg, #4f46e5 0%, #3b82f6 100%);
+                color: #ffffff !important;
+                padding: 12px 24px;
+                border-radius: 8px;
+                text-decoration: none;
+                font-weight: 600;
+                font-size: 16px;
+                box-shadow: 0 4px 6px -1px rgba(79, 70, 229, 0.25);
+            ">
+                🌐 Sign in with Google / GitHub
+            </a>
+            ''',
+            unsafe_allow_html=True
         )
-    with col_s2:
-        if st.button("⚡ Step 2: Sync Active Session", type="secondary", use_container_width=True):
-            with st.spinner("Connecting to Clerk Cloud API..."):
+
+    with col_sync:
+        if st.button("🔄 Manual Sync (If completed elsewhere)", type="secondary", use_container_width=True):
+            with st.spinner("Syncing latest session from Clerk Cloud API..."):
                 latest_user = fetch_latest_signed_in_user(sec_key)
                 if latest_user:
                     set_active_user_from_clerk_data(latest_user)
                     st.success(f"Logged in as {st.session_state.get('name')}!")
                     st.rerun()
                 else:
-                    st.error("No recent Clerk sign-in detected. Please complete Step 1 first.")
+                    st.error("No active Clerk sign-in detected yet.")
 
-    # Live Registered Users quick-switch
-    st.markdown("#### 👥 Or Select from Live Clerk Cloud Users")
+    st.markdown("---")
+    st.markdown("#### 👥 Or Select An Existing Account in Your Clerk Tenant:")
     try:
         users = fetch_clerk_users_list(sec_key, limit=5)
         if users:
@@ -503,3 +565,4 @@ def render_clerk_login_gate(cfg: Any = None) -> None:
             st.caption("No registered users returned by Clerk yet.")
     except Exception as exc:
         st.caption(f"Note: Could not list users ({exc})")
+    st.stop()

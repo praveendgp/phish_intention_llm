@@ -1,13 +1,9 @@
-"""
-PhishIntentionLLM - Main Streamlit Entry Point with Real-Time Clerk OAuth & Subscription RBAC.
-"""
-
+"""PhishIntentionLLM - Main Streamlit Entry Point with Real-Time Clerk OAuth & Subscription RBAC."""
 from __future__ import annotations
 
 import os
 import sys
 from pathlib import Path
-
 import streamlit as st
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -30,17 +26,16 @@ st.set_page_config(
     initial_sidebar_state="expanded",
 )
 
-# Load configuration using the supported load_config() function
 cfg = load_config("config.yaml")
 
-# 1. Initialize auth & check for incoming Clerk OAuth redirect callbacks
+# 1. Initialize auth session keys & check for incoming Clerk OAuth redirect callbacks (?clerk_sync=1)
 init_clerk_auth(cfg)
 check_realtime_clerk_callback(cfg)
 
 # 2. Render sidebar login / user profile / subscription status
 render_clerk_auth_sidebar(cfg)
 
-# 3. GATE: If user is not authenticated with Google/GitHub, show login gate and STOP!
+# 3. GATE: If user is not authenticated with Google/GitHub, show login gate and halt!
 if not st.session_state.get("authenticated", False):
     render_clerk_login_gate(cfg)
     st.stop()
@@ -52,6 +47,5 @@ pages = [
     st.Page(str(VIEWS / "manual_annotation.py"), title="Threat Intelligence Archive", icon="🗄️"),
     st.Page(str(VIEWS / "knowledge_base.py"), title="RAG Knowledge Base", icon="🧠"),
 ]
-
 nav = st.navigation(pages)
 nav.run()
